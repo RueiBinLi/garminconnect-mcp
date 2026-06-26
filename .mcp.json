@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "garmin": {
+      "type": "stdio",
+      "command": "/path/to/garminconnect-mcp/.venv/bin/garminconnect-mcp",
+      "args": []
+    }
+  }
+}

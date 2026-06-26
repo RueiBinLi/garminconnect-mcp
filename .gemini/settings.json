@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "garmin": {
+      "command": "/path/to/garminconnect-mcp/.venv/bin/garminconnect-mcp",
+      "args": [],
+      "cwd": "/path/to/garminconnect-mcp",
+      "timeout": 600000,
+      "trust": false
+    }
+  }
+}
