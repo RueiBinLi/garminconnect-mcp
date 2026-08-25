@@ -20,21 +20,21 @@ Understand exactly what the existing repository already provides.
 
 ## Tasks
 
-* [ ] Read the complete README.
-* [ ] Read `AGENTS.md` if upstream contains one.
-* [ ] Inspect project structure.
-* [ ] Identify Garmin authentication implementation.
-* [ ] Identify MCP framework and transport.
-* [ ] List every existing MCP tool.
-* [ ] Identify read versus write tools.
-* [ ] Identify tests.
-* [ ] Identify Garmin library dependency.
-* [ ] Identify where tokens are stored.
-* [ ] Verify `.gitignore` protects secrets.
-* [ ] Run existing tests.
-* [ ] Run lint/static checks.
-* [ ] Document existing architecture in `docs/ARCHITECTURE.md`.
-* [ ] Document gaps between upstream capabilities and `PROJECT_SPEC.md`.
+* [x] Read the complete README.
+* [x] Read `AGENTS.md` if upstream contains one.
+* [x] Inspect project structure.
+* [x] Identify Garmin authentication implementation.
+* [x] Identify MCP framework and transport.
+* [x] List every existing MCP tool.
+* [x] Identify read versus write tools.
+* [x] Identify tests.
+* [x] Identify Garmin library dependency.
+* [x] Identify where tokens are stored.
+* [x] Verify `.gitignore` protects secrets.
+* [x] Run existing tests.
+* [x] Run lint/static checks.
+* [x] Document existing architecture in `docs/ARCHITECTURE.md`.
+* [x] Document gaps between upstream capabilities and `PROJECT_SPEC.md`.
 
 ## Done When
 
