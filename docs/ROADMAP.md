@@ -80,12 +80,20 @@ Connect the local server to Codex.
 
 ## Tasks
 
-* [ ] Determine current supported Codex MCP configuration.
-* [ ] Add the Garmin server.
-* [ ] Start a new Codex session.
-* [ ] Verify Garmin MCP tools are discoverable.
-* [ ] Run the connection tool from Codex.
-* [ ] Document setup in `README.md`.
+* [x] Determine current supported Codex MCP configuration.
+* [x] Add the Garmin server at Codex host scope and add a trusted-project stdio
+      policy configuration.
+* [x] Start a new Codex session.
+* [x] Verify Garmin MCP tools are discoverable through an automated stdio
+      handshake.
+* [x] Run only the connection-safe status tool through the MCP connection.
+* [x] Document setup in `README.md`.
+
+Status: completed on 2026-08-26. The first desktop manual attempt exposed a
+project-versus-host configuration scope mismatch, which was resolved with
+host-level registration. The user then confirmed from a restarted local client
+and new task that `garmin` was enabled and the connection worked. No private
+Garmin fitness data or workout write operation was used.
 
 ## Manual Test
 

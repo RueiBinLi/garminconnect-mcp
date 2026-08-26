@@ -1,0 +1,13 @@
+[mcp_servers.garmin]
+command = ".venv/bin/garminconnect-mcp"
+args = ["serve"]
+required = true
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.garmin.tools.garmin_connection_status]
+approval_mode = "auto"
+
+[mcp_servers.garmin.tools.garmin_ping]
+approval_mode = "auto"

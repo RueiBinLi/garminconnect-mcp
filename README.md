@@ -45,17 +45,48 @@ As an alternative, `.env` is ignored by Git and may contain `GARMIN_EMAIL` and
 `GARMIN_PASSWORD`, but temporary shell variables reduce the number of credential
 copies. Never put credentials or MFA codes in `.env.example`.
 
-The MCP server runs over stdio. Configure Codex with this command:
+## Codex MCP setup
 
-```json
-{
-  "mcpServers": {
-    "garmin": {
-      "command": "/path/to/garminconnect-mcp/.venv/bin/garminconnect-mcp"
-    }
-  }
-}
+Codex supports local stdio MCP servers in `config.toml`. The ChatGPT desktop app,
+Codex CLI, and Codex IDE extension share MCP configuration for the same Codex
+host. Register this repository's server at host scope so it appears in desktop
+MCP settings (replace the path with this repository's absolute path):
+
+```bash
+codex mcp add garmin -- \
+  /absolute/path/to/garminconnect-mcp/.venv/bin/garminconnect-mcp serve
 ```
+
+This command stores only the executable path and `serve` argument in the local
+Codex host configuration. It does not store Garmin credentials or token values.
+Confirm the registration from any directory with `codex mcp get garmin`.
+
+This repository also includes a trusted-project policy configuration at
+`.codex/config.toml`. It applies the stricter approval settings below when Codex
+is working in this project.
+
+The project configuration starts `.venv/bin/garminconnect-mcp serve`, exposes the
+server's complete tool inventory, and prompts before tools by default. Only the
+connection-safe `garmin_connection_status` and `garmin_ping` tools are configured
+for automatic approval. It contains no credentials or token-directory contents.
+The server continues to use saved tokens from `~/.garminconnect` by default,
+outside this repository.
+
+After installing the project environment and completing the saved-token login:
+
+1. Register the host-level server with `codex mcp add` as shown above.
+2. Open this repository as a trusted Codex project.
+3. Fully quit and reopen the ChatGPT desktop app, restart the IDE extension, or
+   start a new Codex CLI session. Create a new task so it receives the refreshed
+   MCP tool inventory.
+4. Use `/mcp` in the composer or Codex terminal UI to confirm that `garmin` is
+   enabled and its tools are visible.
+5. Ask Codex to run only `garmin_connection_status` (or `garmin_ping`). A
+   successful result is `{"ok": true}`.
+
+Do not use profile, activity, health, recovery, or workout tools during this
+connection milestone. See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) for
+the complete Milestone 2 acceptance checklist and troubleshooting guidance.
 
 Claude config files are included too:
 

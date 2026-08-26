@@ -48,6 +48,47 @@ third-party client directly, so there is not yet a replaceable Garmin provider
 boundary or an application-service layer. Most read responses also pass raw
 Garmin dictionaries directly to the MCP client.
 
+## Codex integration
+
+Milestone 2 registers the server in the local Codex host configuration and adds
+a trusted-project policy configuration in `.codex/config.toml`. Both use Codex's
+supported stdio MCP transport to start the existing console entry point with
+`serve`:
+
+```text
+Codex host
+    │ host config registers the repository's absolute executable path
+    │ project config applies stricter tool approval policy
+    │ starts garminconnect-mcp serve
+    ▼
+FastMCP stdio server
+    │ lists 16 MCP tools without contacting Garmin
+    │ invokes only an explicitly selected tool
+    ▼
+Saved-token Garmin client
+```
+
+Neither configuration contains Garmin credentials, tokens, MFA values, or a
+repository-local token path. The untracked host configuration stores the
+absolute executable path and `serve` argument; authentication keeps using the
+external default token directory. All 16 tools remain discoverable so future
+milestones can use the same connection, but the project policy prompts before
+tools by default; only `garmin_connection_status` and `garmin_ping` have
+automatic approval.
+
+The automated Milestone 2 handshake verified stdio initialization and tool
+discovery without calling Garmin data methods. The connection-only status call
+succeeded with local network access. A managed shell sandbox without network
+access reproduced a sanitized connection failure, so live MCP checks require a
+local Codex host that can reach Garmin Connect.
+
+During manual verification, the desktop app did not show a server configured
+only in project scope even though the CLI loaded it from the repository. Adding
+the same server through `codex mcp add` made it visible at host scope while the
+tracked project configuration continued to supply repository-specific approval
+policy. Existing tasks retain their startup tool inventory, so verification must
+use a fresh task after the local client restarts.
+
 ## Authentication and token storage
 
 1. `_client()` loads the repository-root `.env` through `python-dotenv`.
@@ -136,6 +177,10 @@ Milestone 0 results:
 There are no opt-in integration tests, live Garmin smoke tests, static type
 checker configuration, CI workflow, dependency lock file, date-validation tests,
 error-mapping tests, or normalized-schema tests.
+
+Milestone 2 adds an offline configuration test for the project-scoped Codex MCP
+entry and its approval policy. It does not launch Garmin or inspect the external
+token directory.
 
 ## Gap analysis against `PROJECT_SPEC.md`
 
