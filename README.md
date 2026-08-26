@@ -84,9 +84,9 @@ After installing the project environment and completing the saved-token login:
 5. Ask Codex to run only `garmin_connection_status` (or `garmin_ping`). A
    successful result is `{"ok": true}`.
 
-Do not use profile, health, recovery, or workout tools for activity verification.
 See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) for the focused,
-read-only Milestone 3 acceptance checklist.
+read-only Milestone 4 recovery acceptance checklist. Do not invoke profile,
+activity, workout, scheduled-workout, or training-plan tools during that check.
 
 Claude config files are included too:
 
@@ -107,13 +107,17 @@ Connection-only tools:
 - `garmin_connection_status`
 - `garmin_ping`
 
-Raw private Garmin data tools:
+Raw private Garmin profile tool:
 
 - `garmin_profile`
+
+Normalized read-only recovery tools:
+
 - `garmin_daily_stats`
 - `garmin_heart_rate`
 - `garmin_sleep`
 - `garmin_hrv`
+- `garmin_hrv_range(start_date, end_date)`
 - `garmin_body_battery`
 - `garmin_stress`
 
@@ -130,7 +134,8 @@ Summarized workout tools:
 - `garmin_create_scheduled_workout`
 - `garmin_unschedule_workout`
 
-Dates use `YYYY-MM-DD`. If omitted, tools default to today.
+Dates use strict `YYYY-MM-DD` formatting. Single-date recovery tools default to
+today when the date is omitted. HRV ranges are inclusive and limited to 14 days.
 
 Use `garmin_connection_status` or `garmin_ping` for smoke tests. They validate
 login without returning profile, health, or account data.
@@ -149,9 +154,22 @@ return raw chart, polyline, owner, profile-image, role, or privacy metadata.
 Invalid pagination, unknown IDs, malformed responses, authentication failures,
 rate limits, and endpoint failures produce bounded, secret-safe errors.
 
-This is a personal local MCP server, and the remaining raw health/profile tools
-intentionally return full Garmin payloads. Avoid pasting those raw responses into
-docs, examples, issues, or other durable text unless you have sanitized them.
+Recovery tools return compact factual measurements only. Daily statistics use
+meters, seconds, kcal, and bpm. Heart-rate summaries use bpm; sleep and sleep
+stages use seconds; HRV uses milliseconds; Body Battery and stress retain
+Garmin's native scales. Sleep timestamps are normalized to UTC ISO 8601. Garmin
+score/status labels are passed through without interpretation. Missing fields
+are returned as `null`, missing HRV range days are omitted, and no value is
+estimated.
+
+The recovery provider discards per-sample heart-rate, movement, respiration,
+HRV, Body Battery, and stress arrays after deriving the documented daily
+summary. Invalid dates and ranges, malformed responses, authentication failures,
+rate limits, and endpoint failures produce bounded, secret-safe errors. These
+tools are read-only and cannot affect a Garmin watch.
+
+The profile tool still returns a raw private Garmin payload. Avoid using it for
+recovery verification or pasting its response into durable text.
 
 Workout tools return summarized fields instead of raw Garmin payloads. To create
 and schedule a new workout, pass Garmin Connect workout JSON to

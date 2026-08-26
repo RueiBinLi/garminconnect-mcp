@@ -1,102 +1,98 @@
-# Manual Milestone 3 Activity Verification
+# Manual Milestone 4 Recovery Verification
 
-This guide records verification of the read-only Milestone 3 activity
+This checklist records verification of the read-only Milestone 4 recovery
 implementation. The user confirmed all acceptance checks on 2026-08-26. No
-Garmin write operation was used.
+Garmin write or delete operation was used.
 
 ## Safety and privacy boundary
 
 Use only these tools:
 
-- `garmin_recent_activities`
-- `garmin_activity`
+- `garmin_daily_stats`
+- `garmin_heart_rate`
+- `garmin_sleep`
+- `garmin_hrv`
+- `garmin_hrv_range`
+- `garmin_body_battery`
+- `garmin_stress`
 
-Do not invoke profile, health, sleep, HRV, Body Battery, stress, recovery, or
-workout tools. Do not create, schedule, modify, unschedule, or delete anything.
-The two allowed tools are read-only and cannot affect the watch.
+Do not invoke profile, activity, workout, scheduled-workout, training-plan, or
+any Garmin write/delete tool. These seven recovery tools are read-only and
+cannot change the watch.
 
-Keep displayed activity values only in the local verification conversation. Do
+Keep displayed health values only in the local verification conversation. Do
 not paste them into documentation, commits, tests, fixtures, issues, logs, or
 other durable files. Never display or inspect credentials, MFA codes, saved
 tokens, session files, or the external token directory.
 
 ## Prerequisites
 
-- Milestones 1 and 2 are complete.
+- Milestones 1 through 3 are complete.
 - Saved-token authentication works without credential environment variables.
-- The local Codex client has been restarted so it sees the updated activity tool
-  signatures.
-- Garmin Connect is open separately for visual comparison.
+- Restart the local Codex client and create a new task so it discovers the new
+  `garmin_hrv_range` tool and updated recovery schemas.
+- Open Garmin Connect separately for visual comparison.
 
 ## Verification
 
-1. Ask Codex:
+1. Select one recent night that has sleep data. Ask Codex locally to call only
+   `garmin_sleep` for its `YYYY-MM-DD` date. Compare the UTC start/end times,
+   total sleep, deep/light/REM/awake/unmeasurable/nap durations, and Garmin sleep
+   score/status. Durations must be seconds, and unavailable values must be
+   `null`.
 
-   ```text
-   Use only garmin_recent_activities with start 0, limit 5, and running_only
-   false. Show the normalized result. Do not call any other Garmin tool.
-   ```
+2. Select an inclusive date window containing the last three available HRV
+   days. Ask Codex locally to call only `garmin_hrv_range`. Keep the window at 14
+   days or fewer. Confirm the returned days and Garmin-supplied weekly average,
+   last-night average, five-minute high, and status. Values must be milliseconds;
+   Garmin days with no HRV summary may be omitted.
 
-   Confirm exactly five or the available smaller count is returned. Compare the
-   name, date/time, type, distance, duration, pace, heart rate, cadence, and
-   elevation values with Garmin Connect. Units must be meters, seconds, seconds
-   per kilometer, bpm, spm, and meters respectively.
+3. Ask Codex locally to call only `garmin_body_battery` for today's date. Compare
+   charged, drained, highest, lowest, and latest values. They must use Garmin's
+   native Body Battery scale. Confirm no sample timeline or event details are
+   returned.
 
-2. Ask Codex:
+4. Select one date and ask Codex locally to call only `garmin_heart_rate` and
+   `garmin_stress` for that date. Compare resting/minimum/maximum and seven-day
+   average resting heart rate in bpm where Garmin supplies them. Compare average
+   and maximum stress on Garmin's native scale. Confirm no per-sample chart data
+   is returned.
 
-   ```text
-   Use only garmin_recent_activities with start 0, limit 5, and running_only
-   true. Show the normalized result. Do not call any other Garmin tool.
-   ```
+5. For a field Garmin does not supply on one of the selected dates, confirm the
+   normalized key remains present with `null`. Do not infer or calculate a
+   replacement. An empty single-date response should retain the requested date
+   and otherwise contain null fields; a missing HRV-range day may be absent.
 
-   Confirm every returned item is a run in Garmin Connect. This page is the five
-   most recent running activities, not merely the running subset of the previous
-   all-activity page.
-
-3. Choose one activity ID from the running-only result, then ask Codex locally:
-
-   ```text
-   Use only garmin_activity for the selected recent run ID. Show the normalized
-   result. Do not call any other Garmin tool.
-   ```
-
-   Insert the selected ID through the tool UI or local prompt without copying it
-   into a tracked file. Confirm the returned activity ID matches the selection
-   and compare every available normalized field with Garmin Connect.
-
-4. In any result where Garmin did not supply a normalized field, confirm the key
-   is still present with `null`. Confirm Codex does not estimate a missing metric.
-   In particular, pace must remain `null` when Garmin does not supply average
-   speed.
+`garmin_daily_stats` is also available for a factual compact daily summary in
+meters, seconds, kcal, bpm, and Garmin-native stress/Body Battery units. Its
+shape was covered by the live structural probe and synthetic tests; invoking it
+is optional for the focused acceptance checklist.
 
 ## Expected safe failures
 
-- `start` below zero is rejected.
-- `limit` outside 1 through 100 is rejected before Garmin is called.
-- A nonnumeric or nonpositive activity ID is rejected before Garmin is called.
-- An unknown numeric activity ID reports that the activity was not found.
-- Expired authentication asks for saved-login refresh without exposing upstream
-  response text or secrets.
-- Malformed responses and endpoint/rate-limit failures return concise categories
-  without raw Garmin payloads.
+- Invalid or impossible dates are rejected before Garmin is called.
+- HRV start dates after end dates are rejected.
+- HRV ranges longer than 14 inclusive days are rejected.
+- Expired authentication asks for a saved-login refresh without exposing
+  upstream response text or secrets.
+- Malformed responses, rate limits, and endpoint failures return concise,
+  secret-safe categories without raw Garmin payloads.
 
-Do not intentionally expire tokens or probe unknown IDs merely to complete the
-main acceptance checklist; these failure paths are covered by synthetic tests.
+Do not intentionally expire tokens or trigger rate limits merely to complete
+manual acceptance; these paths are covered by synthetic tests.
 
 ## Acceptance checklist
 
-- [x] Latest five normalized activities match Garmin Connect.
-- [x] Running-only filtering returns only runs and matches Garmin Connect order.
-- [x] One selected recent run's normalized details match Garmin Connect.
-- [x] Unavailable Garmin fields are present as `null` and are not estimated.
-- [x] No profile, health, sleep, HRV, Body Battery, stress, recovery, or workout
-      data was requested.
-- [x] No Garmin write or delete tool was invoked.
-- [x] No private activity value, account data, credential, MFA code, token, or
-      session file was saved to the repository or another durable output.
-- [x] `git status --short` contains only the focused Milestone 3 source, test, and
+- [x] Normalized sleep for one recent night matches Garmin Connect.
+- [x] Normalized HRV for the last three available days matches Garmin Connect.
+- [x] Today's normalized Body Battery matches Garmin Connect.
+- [x] Normalized heart-rate and stress information for one selected date matches.
+- [x] Unavailable fields are `null`, missing HRV days are omitted, and no values
+      are estimated.
+- [x] No profile, activity, workout, scheduled-workout, or training-plan data was
+      requested.
+- [x] No Garmin write or delete tool was invoked; the watch was unaffected.
+- [x] No private health value, account data, credential, MFA code, token, session
+      file, or raw payload was saved to the repository or another durable output.
+- [x] `git status --short` contains only focused Milestone 4 source, test, and
       documentation changes.
-
-Canonical response fields use meters and seconds for unambiguous calculations.
-Clients may display distance in kilometers and pace as `MM:SS/km` without
-changing the normalized schema.

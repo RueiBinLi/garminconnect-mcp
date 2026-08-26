@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
 
-from .provider import GarminActivityProvider
+from .provider import GarminActivityProvider, GarminRecoveryProvider
 
 mcp = FastMCP("Garmin Connect")
 
@@ -22,6 +22,10 @@ def _env_path() -> Path:
 
 def _today() -> str:
     return date.today().isoformat()
+
+
+def _day_or_today(day: str | None) -> str:
+    return _today() if day is None else day
 
 
 def _token_dir() -> str:
@@ -78,6 +82,10 @@ def _call_first(method_names: tuple[str, ...], *args: Any, **kwargs: Any) -> Any
 
 def _activity_provider() -> GarminActivityProvider:
     return GarminActivityProvider(_client)
+
+
+def _recovery_provider() -> GarminRecoveryProvider:
+    return GarminRecoveryProvider(_client)
 
 
 def _first_present(data: dict[str, Any], keys: tuple[str, ...]) -> Any:
@@ -204,38 +212,80 @@ def garmin_profile() -> dict[str, Any]:
 
 @mcp.tool()
 def garmin_daily_stats(day: str | None = None) -> dict[str, Any]:
-    """Get raw private daily Garmin stats for a date in YYYY-MM-DD format."""
-    return _call("get_stats", day or _today())
+    """Get compact normalized daily statistics for a YYYY-MM-DD date.
+
+    Durations use seconds, distance uses meters, energy uses kcal, and heart
+    rate uses bpm. Stress and Body Battery retain Garmin's native scales.
+    Missing Garmin fields are null. This tool is read-only.
+    """
+    return _recovery_provider().daily_statistics(_day_or_today(day))
 
 
 @mcp.tool()
 def garmin_heart_rate(day: str | None = None) -> dict[str, Any]:
-    """Get raw private heart-rate data for a date in YYYY-MM-DD format."""
-    return _call("get_heart_rates", day or _today())
+    """Get normalized daily and resting heart-rate summaries in bpm.
+
+    The date must use YYYY-MM-DD. Per-sample heart-rate data is discarded,
+    unavailable fields are null, and this tool is read-only.
+    """
+    return _recovery_provider().heart_rate(_day_or_today(day))
 
 
 @mcp.tool()
 def garmin_sleep(day: str | None = None) -> dict[str, Any]:
-    """Get raw private sleep data for a date in YYYY-MM-DD format."""
-    return _call_first(("get_sleep_data", "get_sleep"), day or _today())
+    """Get normalized sleep for a YYYY-MM-DD date.
+
+    Sleep and stage durations use seconds. Times are UTC ISO 8601 strings.
+    Garmin score/status fields are factual values, missing fields are null,
+    and detailed sample arrays are discarded. This tool is read-only.
+    """
+    return _recovery_provider().sleep(_day_or_today(day))
 
 
 @mcp.tool()
 def garmin_hrv(day: str | None = None) -> dict[str, Any]:
-    """Get raw private HRV data for a date in YYYY-MM-DD format."""
-    return _call_first(("get_hrv_data", "get_hrv"), day or _today())
+    """Get normalized nightly HRV summary values in milliseconds.
+
+    The date must use YYYY-MM-DD. Garmin's status is returned without medical
+    interpretation, unavailable fields are null, and this tool is read-only.
+    """
+    return _recovery_provider().hrv(_day_or_today(day))
 
 
 @mcp.tool()
-def garmin_body_battery(day: str | None = None) -> list[dict[str, Any]]:
-    """Get raw private Body Battery data for a date in YYYY-MM-DD format."""
-    return _call_first(("get_body_battery", "get_body_battery_events"), day or _today())
+def garmin_hrv_range(start_date: str, end_date: str) -> dict[str, Any]:
+    """Get normalized HRV summaries for an inclusive range of up to 14 days.
+
+    Dates must use YYYY-MM-DD. Values use milliseconds, missing days are
+    omitted by Garmin, unavailable fields are null, and this tool is read-only.
+    """
+    items = _recovery_provider().hrv_range(start_date, end_date)
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "count": len(items),
+        "items": items,
+    }
+
+
+@mcp.tool()
+def garmin_body_battery(day: str | None = None) -> dict[str, Any]:
+    """Get normalized Body Battery summary values for a YYYY-MM-DD date.
+
+    Values retain Garmin's native scale. Sample timestamps and event details
+    are discarded, unavailable fields are null, and this tool is read-only.
+    """
+    return _recovery_provider().body_battery(_day_or_today(day))
 
 
 @mcp.tool()
 def garmin_stress(day: str | None = None) -> dict[str, Any]:
-    """Get raw private stress data for a date in YYYY-MM-DD format."""
-    return _call_first(("get_stress_data", "get_stress"), day or _today())
+    """Get normalized daily stress summary values for a YYYY-MM-DD date.
+
+    Values retain Garmin's native scale. Per-sample stress and Body Battery
+    data are discarded, unavailable fields are null, and this tool is read-only.
+    """
+    return _recovery_provider().stress(_day_or_today(day))
 
 
 @mcp.tool()

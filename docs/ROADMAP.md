@@ -173,15 +173,21 @@ Allow Codex to inspect recovery-related Garmin metrics.
 
 ## Tasks
 
-* [ ] Verify daily stats.
-* [ ] Verify sleep.
-* [ ] Verify HRV.
-* [ ] Verify Body Battery.
-* [ ] Verify heart-rate data.
-* [ ] Verify stress data where available.
-* [ ] Normalize high-value metrics.
-* [ ] Add date validation.
-* [ ] Test unavailable-data handling.
+* [x] Inspect daily-statistics response structure with a minimal read-only probe.
+* [x] Inspect sleep response structure with a minimal read-only probe.
+* [x] Inspect single-date and bounded-range HRV response structures.
+* [x] Inspect Body Battery response structure with a minimal read-only probe.
+* [x] Inspect heart-rate response structure with a minimal read-only probe.
+* [x] Inspect stress response structure with a minimal read-only probe.
+* [x] Normalize high-value factual metrics with explicit units and native scales.
+* [x] Add strict date and 14-day inclusive HRV-range validation.
+* [x] Test unavailable and malformed-data handling with synthetic fixtures.
+* [x] Complete user manual verification against Garmin Connect.
+
+Status: completed on 2026-08-26. The user confirmed normalized sleep, the last
+three available HRV summaries, today's Body Battery, heart-rate and stress for a
+selected date, and unavailable-field behavior against Garmin Connect. No Garmin
+write or delete operation was used.
 
 ## Manual Tests
 
@@ -200,6 +206,14 @@ What was my Body Battery today?
 ```
 
 Compare against Garmin Connect.
+
+Manual acceptance:
+
+* [x] One recent night's normalized sleep matches Garmin Connect.
+* [x] The last three available normalized HRV summaries match Garmin Connect.
+* [x] Today's normalized Body Battery matches Garmin Connect.
+* [x] Heart-rate and stress summaries for one selected date match Garmin Connect.
+* [x] Unavailable fields are present as `null` and are not estimated.
 
 ---
 

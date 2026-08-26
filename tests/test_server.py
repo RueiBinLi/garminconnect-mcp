@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from garminconnect_mcp import server
+from garminconnect_mcp.provider import InvalidRecoveryRequestError
 
 
 class FakeDate:
@@ -41,23 +42,39 @@ class FakeClient:
         return "Runner Example"
 
     def get_stats(self, cdate: str) -> dict[str, object]:
-        return self._record("get_stats", cdate)
+        self.calls.append(("get_stats", (cdate,), {}))
+        return {"calendarDate": cdate, "totalSteps": 1234}
 
     def get_heart_rates(self, cdate: str) -> dict[str, object]:
-        return self._record("get_heart_rates", cdate)
+        self.calls.append(("get_heart_rates", (cdate,), {}))
+        return {"calendarDate": cdate, "restingHeartRate": 50}
 
     def get_sleep_data(self, cdate: str) -> dict[str, object]:
-        return self._record("get_sleep_data", cdate)
+        self.calls.append(("get_sleep_data", (cdate,), {}))
+        return {"dailySleepDTO": {"calendarDate": cdate, "sleepTimeSeconds": 1}}
 
     def get_hrv_data(self, cdate: str) -> dict[str, object]:
-        return self._record("get_hrv_data", cdate)
+        self.calls.append(("get_hrv_data", (cdate,), {}))
+        return {"hrvSummary": {"calendarDate": cdate, "lastNightAvg": 1}}
 
-    def get_body_battery(self, startdate: str) -> list[dict[str, object]]:
+    def get_hrv_data_range(self, start: str, end: str) -> dict[str, object]:
+        self.calls.append(("get_hrv_data_range", (start, end), {}))
+        return {
+            "hrvSummaries": [
+                {"calendarDate": start, "lastNightAvg": 1},
+                {"calendarDate": end, "lastNightAvg": 2},
+            ]
+        }
+
+    def get_body_battery(
+        self, startdate: str, enddate: str | None = None
+    ) -> list[dict[str, object]]:
         self.calls.append(("get_body_battery", (startdate,), {}))
-        return [{"method": "get_body_battery", "args": (startdate,)}]
+        return [{"date": startdate, "charged": 1, "bodyBatteryValuesArray": []}]
 
     def get_stress_data(self, cdate: str) -> dict[str, object]:
-        return self._record("get_stress_data", cdate)
+        self.calls.append(("get_stress_data", (cdate,), {}))
+        return {"calendarDate": cdate, "avgStressLevel": 1}
 
     def get_activities(
         self,
@@ -186,14 +203,16 @@ def test_mfa_code_prompts_in_interactive_terminal(
 
 
 def test_call_first_uses_first_existing_method(fake_client: FakeClient) -> None:
-    result = server._call_first(("missing_method", "get_stats"), "2026-05-21")
+    result = server._call_first(
+        ("missing_method", "get_activity_details"), "9000000000"
+    )
 
     assert result == {
-        "method": "get_stats",
-        "args": ("2026-05-21",),
+        "method": "get_activity_details",
+        "args": ("9000000000",),
         "kwargs": {},
     }
-    assert fake_client.calls == [("get_stats", ("2026-05-21",), {})]
+    assert fake_client.calls == [("get_activity_details", ("9000000000",), {})]
 
 
 def test_call_first_raises_when_no_method_exists(fake_client: FakeClient) -> None:
@@ -231,12 +250,12 @@ def test_date_defaulted_tools_use_today(
 ) -> None:
     monkeypatch.setattr(server, "date", FakeDate)
 
-    assert server.garmin_daily_stats()["args"] == ("2026-05-21",)
-    assert server.garmin_heart_rate()["args"] == ("2026-05-21",)
-    assert server.garmin_sleep()["args"] == ("2026-05-21",)
-    assert server.garmin_hrv()["args"] == ("2026-05-21",)
-    assert server.garmin_body_battery()[0]["args"] == ("2026-05-21",)
-    assert server.garmin_stress()["args"] == ("2026-05-21",)
+    assert server.garmin_daily_stats()["date"] == "2026-05-21"
+    assert server.garmin_heart_rate()["date"] == "2026-05-21"
+    assert server.garmin_sleep()["date"] == "2026-05-21"
+    assert server.garmin_hrv()["date"] == "2026-05-21"
+    assert server.garmin_body_battery()["date"] == "2026-05-21"
+    assert server.garmin_stress()["date"] == "2026-05-21"
 
     assert [call[0] for call in fake_client.calls] == [
         "get_stats",
@@ -248,8 +267,16 @@ def test_date_defaulted_tools_use_today(
     ]
 
 
+def test_explicit_empty_recovery_date_is_rejected_before_call(
+    fake_client: FakeClient,
+) -> None:
+    with pytest.raises(InvalidRecoveryRequestError, match="YYYY-MM-DD"):
+        server.garmin_sleep("")
+    assert fake_client.calls == []
+
+
 def test_tools_pass_explicit_arguments(fake_client: FakeClient) -> None:
-    assert server.garmin_daily_stats("2026-05-20")["args"] == ("2026-05-20",)
+    assert server.garmin_daily_stats("2026-05-20")["date"] == "2026-05-20"
     activities = server.garmin_recent_activities(start=5, limit=2)
     activity = server.garmin_activity("987")
 
@@ -265,6 +292,35 @@ def test_tools_pass_explicit_arguments(fake_client: FakeClient) -> None:
         ("get_stats", ("2026-05-20",), {}),
         ("get_activities", (5, 2), {"activitytype": None}),
         ("get_activity", ("987",), {}),
+    ]
+
+
+def test_hrv_range_returns_bounded_normalized_envelope(
+    fake_client: FakeClient,
+) -> None:
+    assert server.garmin_hrv_range("2026-05-19", "2026-05-20") == {
+        "start_date": "2026-05-19",
+        "end_date": "2026-05-20",
+        "count": 2,
+        "items": [
+            {
+                "date": "2026-05-19",
+                "weekly_average_ms": None,
+                "last_night_average_ms": 1.0,
+                "last_night_five_minute_high_ms": None,
+                "status": None,
+            },
+            {
+                "date": "2026-05-20",
+                "weekly_average_ms": None,
+                "last_night_average_ms": 2.0,
+                "last_night_five_minute_high_ms": None,
+                "status": None,
+            },
+        ],
+    }
+    assert fake_client.calls == [
+        ("get_hrv_data_range", ("2026-05-19", "2026-05-20"), {})
     ]
 
 
