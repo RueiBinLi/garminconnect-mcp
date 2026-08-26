@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
 
+from .provider import GarminActivityProvider
+
 mcp = FastMCP("Garmin Connect")
 
 
@@ -72,6 +74,10 @@ def _call_first(method_names: tuple[str, ...], *args: Any, **kwargs: Any) -> Any
         return method(*args, **kwargs)
 
     raise AttributeError(f"None of these garminconnect methods exist: {missing}")
+
+
+def _activity_provider() -> GarminActivityProvider:
+    return GarminActivityProvider(_client)
 
 
 def _first_present(data: dict[str, Any], keys: tuple[str, ...]) -> Any:
@@ -234,16 +240,34 @@ def garmin_stress(day: str | None = None) -> dict[str, Any]:
 
 @mcp.tool()
 def garmin_recent_activities(
-    start: int = 0, limit: int = 10
-) -> dict[str, Any] | list[dict[str, Any]]:
-    """List raw private recent Garmin activities."""
-    return _call("get_activities", start, limit)
+    start: int = 0, limit: int = 10, running_only: bool = False
+) -> dict[str, Any]:
+    """List normalized activities; start >= 0 and limit is 1-100.
+
+    Set running_only to filter at Garmin's activity endpoint. Returned measurements
+    use meters, seconds, seconds per kilometer, bpm, and spm. Missing fields are null.
+    This tool is read-only.
+    """
+    items = _activity_provider().recent_activities(
+        start=start, limit=limit, running_only=running_only
+    )
+    return {
+        "start": start,
+        "limit": limit,
+        "running_only": running_only,
+        "count": len(items),
+        "items": items,
+    }
 
 
 @mcp.tool()
 def garmin_activity(activity_id: str) -> dict[str, Any]:
-    """Get raw private Garmin activity details by activity ID."""
-    return _call_first(("get_activity_details", "get_activity"), activity_id)
+    """Get one normalized activity by numeric ID; this tool is read-only.
+
+    Returned measurements use meters, seconds, seconds per kilometer, bpm, and
+    spm. Missing Garmin fields are returned as null.
+    """
+    return _activity_provider().activity(activity_id)
 
 
 @mcp.tool()

@@ -84,9 +84,9 @@ After installing the project environment and completing the saved-token login:
 5. Ask Codex to run only `garmin_connection_status` (or `garmin_ping`). A
    successful result is `{"ok": true}`.
 
-Do not use profile, activity, health, recovery, or workout tools during this
-connection milestone. See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) for
-the complete Milestone 2 acceptance checklist and troubleshooting guidance.
+Do not use profile, health, recovery, or workout tools for activity verification.
+See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) for the focused,
+read-only Milestone 3 acceptance checklist.
 
 Claude config files are included too:
 
@@ -116,8 +116,11 @@ Raw private Garmin data tools:
 - `garmin_hrv`
 - `garmin_body_battery`
 - `garmin_stress`
-- `garmin_recent_activities`
-- `garmin_activity`
+
+Normalized read-only activity tools:
+
+- `garmin_recent_activities(start=0, limit=10, running_only=false)`
+- `garmin_activity(activity_id)`
 
 Summarized workout tools:
 
@@ -132,9 +135,23 @@ Dates use `YYYY-MM-DD`. If omitted, tools default to today.
 Use `garmin_connection_status` or `garmin_ping` for smoke tests. They validate
 login without returning profile, health, or account data.
 
-This is a personal local MCP server, and the raw tools intentionally return full
-Garmin payloads. Avoid pasting those raw responses into docs, examples, issues,
-or other durable text unless you have sanitized them.
+The activity list supports offsets from zero and page sizes from 1 through 100.
+Set `running_only=true` to request running activities. Both activity tools return
+the same compact fields: activity ID, local and GMT start times, type, name,
+distance in meters, duration in seconds, pace in seconds per kilometer, heart
+rate in bpm, cadence in spm, and elevation gain in meters. Garmin fields that are
+not present are returned as `null`; the server does not estimate missing values.
+Pace is present only when Garmin supplies average speed, which is converted from
+meters per second to seconds per kilometer.
+
+Activity responses are normalized behind a Garmin provider boundary and never
+return raw chart, polyline, owner, profile-image, role, or privacy metadata.
+Invalid pagination, unknown IDs, malformed responses, authentication failures,
+rate limits, and endpoint failures produce bounded, secret-safe errors.
+
+This is a personal local MCP server, and the remaining raw health/profile tools
+intentionally return full Garmin payloads. Avoid pasting those raw responses into
+docs, examples, issues, or other durable text unless you have sanitized them.
 
 Workout tools return summarized fields instead of raw Garmin payloads. To create
 and schedule a new workout, pass Garmin Connect workout JSON to

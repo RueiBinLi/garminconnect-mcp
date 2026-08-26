@@ -1,16 +1,24 @@
 # Garmin Connect MCP — Architecture and Upstream Audit
 
-## Milestone 0 scope
+## Milestone history and current scope
 
 This document records the repository as audited on 2026-08-25. Milestone 0
 changes documentation only; it does not add or change MCP behavior.
+
+Milestone 3 introduces the first Garmin provider/normalization boundary for
+read-only activities. Other tool families remain in their previously audited
+state and are outside the milestone.
 
 ## Repository structure
 
 ```text
 garminconnect-mcp/
-├── src/garminconnect_mcp/server.py  # Authentication, Garmin calls, MCP tools, CLI
+├── src/garminconnect_mcp/server.py  # Authentication, MCP tools, CLI
+├── src/garminconnect_mcp/provider.py # Garmin activity provider and safe errors
+├── src/garminconnect_mcp/activities.py # Pure activity normalization and schema
 ├── tests/test_server.py             # Synthetic unit tests with a fake Garmin client
+├── tests/test_provider.py           # Synthetic activity provider/error tests
+├── tests/test_activities.py         # Synthetic activity normalization tests
 ├── tests/test_private_output_scanner.py
 ├── scripts/check-private-output.sh  # Durable-text privacy scanner
 ├── docs/                            # Client setup, specification, and roadmap
@@ -19,34 +27,85 @@ garminconnect-mcp/
 └── .gitignore                       # Local secret/build/cache exclusions
 ```
 
-The implementation is intentionally small. All runtime behavior currently lives
-in `server.py`; there are no separate provider, application-service, domain-model,
-analysis, or planning modules.
+The implementation remains intentionally small. Activity behavior now has a
+provider seam and pure normalizer; other runtime behavior still lives in
+`server.py`. There are no analysis or planning modules yet.
 
-## Current runtime architecture
+## Current activity architecture
 
 ```text
 MCP client
     │ stdio
     ▼
-FastMCP tool functions (`server.py`)
-    │ direct method dispatch through `_call` / `_call_first`
+FastMCP activity tools (`server.py`)
+    │ bounded request parameters and stable tool responses
+    ▼
+Garmin activity provider (`provider.py`)
+    │ endpoint selection and secret-safe error mapping
     ▼
 Cached `garminconnect.Garmin` client
     │ unofficial Garmin Connect behavior
     ▼
 Garmin Connect
+
+Garmin response
+    │ explicit supported envelopes and fields only
+    ▼
+Pure activity normalizer (`activities.py`)
+    │ compact schema with explicit units and null unavailable values
+    ▼
+FastMCP activity response
 ```
 
-`FastMCP("Garmin Connect")` supplies the MCP framework. The console entry point
-is `garminconnect-mcp = garminconnect_mcp.server:main`. With no command, or with
-`serve`, `main()` calls `mcp.run()`. The project documentation and bundled client
-configurations use the default stdio transport.
+`FastMCP("Garmin Connect")` still supplies the framework and the console entry
+point remains `garminconnect-mcp = garminconnect_mcp.server:main`. With no
+command, or with `serve`, `main()` calls `mcp.run()` over stdio. Authentication,
+token reuse, and stdio startup are unchanged.
 
-This differs from the target architecture in `AGENTS.md`: MCP tools call the
-third-party client directly, so there is not yet a replaceable Garmin provider
-boundary or an application-service layer. Most read responses also pass raw
-Garmin dictionaries directly to the MCP client.
+This is a focused first step toward the target architecture in `AGENTS.md`.
+Activity MCP tools no longer depend on Garmin response keys or exception text.
+Other tool families still call the third-party client directly and should move
+behind equivalent boundaries only in their own milestones.
+
+## Activity response boundary
+
+The upstream recent-activity response was verified live with only five items,
+and one recent run was selected for a single-activity shape check. Nothing was
+written to Garmin, and no raw payload was saved. The observed five-item raw list
+was about 20 KB and a representative item contained 81 fields, including many
+fields irrelevant to training summaries. The chart/polyline-oriented detail
+response was about 8 KB even with minimal chart/polyline limits.
+
+The activity provider therefore uses the compact activity summary endpoint for
+single-activity lookup. The normalizer discards all fields except the stable
+contract below:
+
+| Field | Type/unit | Unavailable behavior |
+| --- | --- | --- |
+| `activity_id` | string identifier | `null` |
+| `start_time_local` | Garmin local date/time string | `null` |
+| `start_time_gmt` | Garmin GMT date/time string | `null` |
+| `activity_type` | Garmin type key | `null` |
+| `name` | string | `null` |
+| `distance_m` | meters | `null` |
+| `duration_s` | seconds | `null` |
+| `pace_s_per_km` | seconds per kilometer | `null` |
+| `average_heart_rate_bpm` | beats per minute | `null` |
+| `maximum_heart_rate_bpm` | beats per minute | `null` |
+| `average_cadence_spm` | steps per minute | `null` |
+| `elevation_gain_m` | meters | `null` |
+
+Pace is a unit conversion from Garmin's supplied average speed. It remains
+`null` if that field is absent or invalid; distance and duration are not used to
+estimate it. The normalizer uses explicit known top-level/summary envelopes and
+rejects unrecognized shapes rather than recursively searching arbitrary Garmin
+payloads.
+
+Recent retrieval accepts offsets from zero and page sizes from 1 through 100.
+Running-only requests are filtered at Garmin's endpoint and checked again at the
+normalization boundary. Stable provider errors distinguish invalid requests,
+authentication failures, unknown activities, malformed responses, rate limits,
+and general endpoint failures without copying upstream exception text.
 
 ## Codex integration
 
@@ -143,8 +202,8 @@ The server exposes 16 tools.
 | `garmin_hrv` | Read, raw/private | Returns raw HRV data for a date | Partial FR-07; no range interface |
 | `garmin_body_battery` | Read, raw/private | Returns raw Body Battery data for a date | Partial FR-08 |
 | `garmin_stress` | Read, raw/private | Returns raw stress data for a date | Required read exists, but is not normalized |
-| `garmin_recent_activities` | Read, raw/private | Returns paginated raw activities | Partial FR-03 |
-| `garmin_activity` | Read, raw/private | Returns raw details by activity ID | Partial FR-04 |
+| `garmin_recent_activities` | Read, normalized/private | Returns bounded, optionally running-only activity summaries with explicit units and null unavailable fields | Milestone 3 scope implemented and manually verified |
+| `garmin_activity` | Read, normalized/private | Returns the same stable schema for one numeric activity ID | Milestone 3 scope implemented and manually verified |
 | `garmin_workouts` | Read, summarized | Returns ID, name, sport, and estimated duration | Substantially covers FR-09 |
 | `garmin_scheduled_workouts` | Read, summarized | Returns one calendar month's scheduled workouts | Substantially covers FR-10 |
 | `garmin_schedule_workout` | Write | Schedules an existing template and summarizes the result | Partial FR-12; no local date validation or duplicate protection |
@@ -174,13 +233,16 @@ Milestone 0 results:
 | `python -m ruff format --check .` | Passed: 11 files already formatted |
 | `python -m compileall -q src` | Passed |
 
-There are no opt-in integration tests, live Garmin smoke tests, static type
-checker configuration, CI workflow, dependency lock file, date-validation tests,
-error-mapping tests, or normalized-schema tests.
+There are no opt-in integration tests, static type checker configuration, CI
+workflow, dependency lock file, or date-validation tests. The default suite is
+offline; the live Milestone 3 shape probes were deliberately one-off and did not
+save raw responses.
 
 Milestone 2 adds an offline configuration test for the project-scoped Codex MCP
-entry and its approval policy. It does not launch Garmin or inspect the external
-token directory.
+entry and its approval policy. Milestone 3 adds synthetic normalizer/provider
+tests covering explicit units, null fields, nested summary envelopes, running
+filtering, bounds, malformed responses, unknown activities, authentication,
+rate limiting, and endpoint errors. Default tests never contact Garmin.
 
 ## Gap analysis against `PROJECT_SPEC.md`
 
@@ -188,8 +250,8 @@ token directory.
 | --- | --- | --- |
 | FR-01 Authentication | Partial | Saved-token login, MFA, and a dedicated login command exist. Live persistence and refresh behavior remain unverified. |
 | FR-02 Connection verification | Implemented | Both `garmin_ping` and a duplicate status tool exist. Live behavior remains for Milestone 1/2 verification. |
-| FR-03 Recent activities | Partial | Raw pagination exists; required normalized fields, explicit units, compact output, date-range support, and graceful missing-field handling do not. |
-| FR-04 Activity details | Partial | Raw detail retrieval exists; no stable activity-detail model or selected running metrics. |
+| FR-03 Recent activities | Milestone 3 complete | Compact explicit-unit pagination and running filtering were manually verified. Date-range support belongs to Milestone 5. |
+| FR-04 Activity details | Milestone 3 complete | One-activity normalized lookup, unavailable fields, and safe unknown-ID handling are implemented; normalized live details were manually verified. |
 | FR-05 Daily recovery | Partial | Raw daily stats and separate recovery endpoints exist; no compact combined recovery representation. |
 | FR-06 Sleep | Partial | Raw date lookup exists; no normalized sleep schema or explicit unavailable values. |
 | FR-07 HRV | Partial | Raw single-date lookup exists; no normalized date-range result. |
@@ -202,22 +264,23 @@ token directory.
 | FR-14 Unschedule workout | Partial | The pass-through operation exists; identifier validation, error mapping, and live verification do not. |
 | Training summaries | Missing | No weekly aggregation, longest-run comparison, session classification, or week-over-week calculations. |
 | Weekly planner | Missing | No proposal model or deterministic planning constraints. |
-| Provider boundary | Missing | Tool functions depend directly on `garminconnect.Garmin` and its method names. |
-| Normalized domain models | Mostly missing | Only workout-list summaries are normalized; health and activity payloads remain raw. |
-| Error handling | Missing as a layer | Third-party exceptions generally propagate without stable categories or secret-aware translation. |
+| Provider boundary | Partial | Activity calls have a clear provider seam; other tool families still directly depend on the Garmin client. |
+| Normalized domain models | Partial | Activities and workout-list summaries are normalized; health/recovery payloads remain raw. |
+| Error handling | Partial | Activity failures use stable secret-safe categories; other tool families still propagate third-party errors. |
 | Write safety | Partial | Results are summarized and unscheduling does not delete templates, but the server has no validation, preview, idempotency, bulk guard, or approval mechanism. |
 | Local-first/single-user | Implemented by design | The stdio process, local `.env`, and local token directory fit the target. |
-| Offline testability | Partial | Existing wrappers are well covered with fakes, but future normalizers, validation, provider behavior, and integration boundaries have no coverage yet. |
+| Offline testability | Partial | Activity normalization, validation, provider behavior, and wrappers are covered with synthetic data; other future boundaries still need coverage in their milestones. |
 
 ## Recommended milestone sequence
 
 The repository already has useful Garmin authentication and endpoint coverage, so
 it should be extended rather than rewritten. The roadmap order remains suitable:
 
-1. Verify authentication and token reuse manually without changing the provider.
-2. Verify MCP discovery and connection from Codex.
-3. Introduce focused normalization at the activity and recovery boundaries.
-4. Extract a provider seam when higher-level logic requires it.
+1. Authentication and token reuse were verified in Milestone 1.
+2. MCP discovery and connection were verified in Milestone 2.
+3. Activity normalization and its provider seam were completed and manually
+   verified in Milestone 3.
+4. Recovery normalization belongs to Milestone 4.
 5. Add validated workout models before relying on existing write pass-throughs.
 
 The MCP dependency incompatibility was resolved in Milestone 1 with an upper

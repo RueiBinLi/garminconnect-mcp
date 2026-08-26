@@ -118,13 +118,21 @@ Provide reliable recent running data.
 
 ## Tasks
 
-* [ ] Test recent activity retrieval.
-* [ ] Test individual activity retrieval.
-* [ ] Inspect Garmin response size.
-* [ ] Introduce normalized activity structures if upstream output is too noisy.
-* [ ] Preserve useful running metrics.
-* [ ] Add synthetic unit-test fixtures.
-* [ ] Handle missing fields gracefully.
+* [x] Test recent activity retrieval with a five-item, read-only structural probe.
+* [x] Test one selected recent run through the individual activity endpoint.
+* [x] Inspect Garmin response size without saving or displaying payload values.
+* [x] Introduce compact normalized activity structures behind a provider seam.
+* [x] Preserve useful running metrics with explicit units.
+* [x] Add synthetic unit-test fixtures.
+* [x] Handle unavailable fields, malformed responses, unknown activities,
+      authentication failures, rate limits, and endpoint failures gracefully.
+* [x] Add bounded offset pagination and running-only filtering.
+
+Status: completed on 2026-08-26. The user confirmed that the latest five
+normalized activities, running-only filtering, one selected run's normalized
+details, and unavailable-field behavior all matched Garmin Connect. No Garmin
+write operation was used. Canonical schema units remain meters and seconds;
+clients may present distance in kilometers and pace as `MM:SS/km`.
 
 ## Manual Tests
 
@@ -147,6 +155,13 @@ Give me details for my latest run.
 ```
 
 Compare results with Garmin Connect.
+
+Manual acceptance:
+
+* [x] Latest five normalized activities match Garmin Connect.
+* [x] Running-only results contain only running activities.
+* [x] One selected recent run's normalized details match Garmin Connect.
+* [x] Garmin fields unavailable for an activity appear as `null`.
 
 ---
 

@@ -59,12 +59,35 @@ class FakeClient:
     def get_stress_data(self, cdate: str) -> dict[str, object]:
         return self._record("get_stress_data", cdate)
 
-    def get_activities(self, start: int = 0, limit: int = 20) -> list[dict[str, int]]:
-        self.calls.append(("get_activities", (start, limit), {}))
-        return [{"activityId": 123}]
+    def get_activities(
+        self,
+        start: int = 0,
+        limit: int = 20,
+        activitytype: str | None = None,
+    ) -> list[dict[str, object]]:
+        self.calls.append(
+            ("get_activities", (start, limit), {"activitytype": activitytype})
+        )
+        return [
+            {
+                "activityId": 123,
+                "activityType": {"typeKey": "running"},
+                "distance": 5000.0,
+                "duration": 1500.0,
+                "averageSpeed": 3.333333333,
+            }
+        ]
 
     def get_activity_details(self, activity_id: str) -> dict[str, object]:
         return self._record("get_activity_details", activity_id)
+
+    def get_activity(self, activity_id: str) -> dict[str, object]:
+        self.calls.append(("get_activity", (activity_id,), {}))
+        return {
+            "activityId": activity_id,
+            "activityName": "Synthetic Run",
+            "activityType": {"typeKey": "running"},
+        }
 
     def get_workouts(self, start: int = 0, limit: int = 100) -> list[dict[str, object]]:
         self.calls.append(("get_workouts", (start, limit), {}))
@@ -227,13 +250,31 @@ def test_date_defaulted_tools_use_today(
 
 def test_tools_pass_explicit_arguments(fake_client: FakeClient) -> None:
     assert server.garmin_daily_stats("2026-05-20")["args"] == ("2026-05-20",)
-    assert server.garmin_recent_activities(start=5, limit=2) == [{"activityId": 123}]
-    assert server.garmin_activity("987")["args"] == ("987",)
+    activities = server.garmin_recent_activities(start=5, limit=2)
+    activity = server.garmin_activity("987")
+
+    assert activities["start"] == 5
+    assert activities["limit"] == 2
+    assert activities["count"] == 1
+    assert activities["items"][0]["activity_id"] == "123"
+    assert activities["items"][0]["pace_s_per_km"] == 300.0
+    assert activity["activity_id"] == "987"
+    assert activity["name"] == "Synthetic Run"
 
     assert fake_client.calls == [
         ("get_stats", ("2026-05-20",), {}),
-        ("get_activities", (5, 2), {}),
-        ("get_activity_details", ("987",), {}),
+        ("get_activities", (5, 2), {"activitytype": None}),
+        ("get_activity", ("987",), {}),
+    ]
+
+
+def test_recent_activities_requests_running_filter(fake_client: FakeClient) -> None:
+    result = server.garmin_recent_activities(limit=5, running_only=True)
+
+    assert result["running_only"] is True
+    assert result["count"] == 1
+    assert fake_client.calls == [
+        ("get_activities", (0, 5), {"activitytype": "running"})
     ]
 
 
