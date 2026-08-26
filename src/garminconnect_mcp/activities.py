@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 from typing import Any, TypedDict
 
 
@@ -161,6 +162,18 @@ def normalize_activity(raw: Any) -> NormalizedActivity:
 def activity_is_running(activity: NormalizedActivity) -> bool:
     activity_type = activity["activity_type"]
     return activity_type is not None and "run" in activity_type.casefold()
+
+
+def normalized_activity_date(activity: NormalizedActivity) -> date | None:
+    """Return the local activity date, falling back to GMT when usable."""
+    for value in (activity["start_time_local"], activity["start_time_gmt"]):
+        if value is None or len(value) < 10:
+            continue
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            continue
+    return None
 
 
 def activity_items(raw: Any) -> list[dict[str, Any]]:

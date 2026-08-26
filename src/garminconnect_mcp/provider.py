@@ -16,6 +16,7 @@ from .activities import (
     activity_is_running,
     activity_items,
     normalize_activity,
+    normalized_activity_date,
 )
 from .recovery import (
     NormalizedBodyBattery,
@@ -35,6 +36,7 @@ from .recovery import (
 )
 
 MAX_ACTIVITY_PAGE_SIZE = 100
+MAX_RUNNING_DATE_RANGE_DAYS = 42
 MAX_HRV_RANGE_DAYS = 14
 
 
@@ -44,6 +46,14 @@ class GarminClient(Protocol):
     ) -> Any: ...
 
     def get_activity(self, activity_id: str) -> Any: ...
+
+    def get_activities_by_date(
+        self,
+        startdate: str,
+        enddate: str | None = None,
+        activitytype: str | None = None,
+        sortorder: str | None = None,
+    ) -> Any: ...
 
     def get_stats(self, cdate: str) -> Any: ...
 
@@ -126,6 +136,51 @@ class GarminActivityProvider:
             not_found=True,
         )
         return normalize_activity(raw)
+
+    def running_activities_by_date(
+        self, start_date: str, end_date: str
+    ) -> list[NormalizedActivity]:
+        """Return compact running activities for an inclusive bounded range."""
+        start_date = self._date(start_date, name="start_date")
+        end_date = self._date(end_date, name="end_date")
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+        if start > end:
+            raise InvalidActivityRequestError(
+                "start_date must be on or before end_date"
+            )
+        day_count = (end - start).days + 1
+        if day_count > MAX_RUNNING_DATE_RANGE_DAYS:
+            raise InvalidActivityRequestError(
+                "running activity ranges must contain at most "
+                f"{MAX_RUNNING_DATE_RANGE_DAYS} days"
+            )
+
+        raw = self._call(
+            "running activities by date",
+            lambda client: client.get_activities_by_date(
+                start_date,
+                end_date,
+                activitytype="running",
+                sortorder="asc",
+            ),
+        )
+        normalized = [normalize_activity(item) for item in activity_items(raw)]
+        result: list[NormalizedActivity] = []
+        for item in normalized:
+            activity_day = normalized_activity_date(item)
+            if activity_is_running(item) and (
+                activity_day is None or start <= activity_day <= end
+            ):
+                result.append(item)
+        return result
+
+    @staticmethod
+    def _date(value: Any, *, name: str) -> str:
+        try:
+            return validate_date(value, name=name)
+        except ValueError as exc:
+            raise InvalidActivityRequestError(str(exc)) from exc
 
     def _call(
         self,

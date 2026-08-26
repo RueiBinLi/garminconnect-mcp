@@ -6,9 +6,9 @@ This document records the repository as audited on 2026-08-25. Milestone 0
 changes documentation only; it does not add or change MCP behavior.
 
 Milestone 3 introduced the first Garmin provider/normalization boundary for
-read-only activities. Milestone 4 extends that boundary to daily statistics,
-heart rate, sleep, HRV, Body Battery, and stress. The user manually verified the
-normalized recovery behavior on 2026-08-26.
+read-only activities. Milestone 4 extended that boundary to recovery data and
+was manually verified. Milestone 5 adds deterministic running aggregation over
+normalized activities and was manually verified on 2026-08-26.
 
 ## Repository structure
 
@@ -17,10 +17,12 @@ garminconnect-mcp/
 ├── src/garminconnect_mcp/server.py  # Authentication, MCP tools, CLI
 ├── src/garminconnect_mcp/provider.py # Garmin activity/recovery providers and safe errors
 ├── src/garminconnect_mcp/activities.py # Pure activity normalization and schema
+├── src/garminconnect_mcp/training.py # Pure weekly and long-run aggregation
 ├── src/garminconnect_mcp/recovery.py # Pure recovery normalization and schemas
 ├── tests/test_server.py             # Synthetic unit tests with a fake Garmin client
 ├── tests/test_provider.py           # Synthetic activity provider/error tests
 ├── tests/test_activities.py         # Synthetic activity normalization tests
+├── tests/test_training.py           # Synthetic running aggregation tests
 ├── tests/test_recovery.py           # Synthetic recovery normalization tests
 ├── tests/test_recovery_provider.py  # Synthetic recovery provider/error tests
 ├── tests/test_private_output_scanner.py
@@ -33,7 +35,8 @@ garminconnect-mcp/
 
 The implementation remains intentionally small. Activity and recovery behavior
 have provider seams and pure normalizers; other runtime behavior still lives in
-`server.py`. There are no analysis or planning modules yet.
+`server.py`. `training.py` performs factual aggregation only; there is no
+coaching or planning module.
 
 ## Current activity architecture
 
@@ -110,6 +113,48 @@ normalization boundary. Stable provider errors distinguish invalid requests,
 authentication failures, unknown activities, malformed responses, rate limits,
 and general endpoint failures without copying upstream exception text.
 
+## Milestone 5 running-summary boundary
+
+The provider exposes one new read-only operation over the dependency's
+`get_activities_by_date` method. It validates strict inclusive dates, limits the
+range to 42 days, requests only running activities in ascending order, and
+normalizes every returned item before a second running-type check. The existing
+dependency performs endpoint pagination. No profile, recovery, workout,
+schedule, training-plan, write, or delete method participates in this flow.
+
+```text
+Four narrow MCP summary tools
+    │ strict dates and small limits
+    ▼
+GarminActivityProvider.running_activities_by_date
+    │ running-filtered, inclusive, maximum 42-day endpoint request
+    ▼
+Existing activity normalizer
+    │ canonical meter/second schema and null unavailable fields
+    ▼
+Pure training aggregation
+    │ Monday-Sunday bins, coverage, longest-distance facts, deltas
+    ▼
+Compact factual MCP response
+```
+
+Weekly aggregation prefers the normalized local start date and falls back to
+the normalized GMT start date. An activity with neither a usable date is counted
+as unassigned rather than silently dropped into a week. Each distance and
+duration total reports available and unavailable activity counts plus a
+completeness flag. A non-empty group with no supplied measurement returns
+`null`; a partially covered group returns the sum of known measurements with
+`complete=false`; an empty week returns zero with complete empty coverage.
+
+The longest run is the activity with the greatest supplied `distance_m`, with
+earliest start time and then activity ID as deterministic tie breakers. Recent
+long-run comparison applies this rule once per Monday-Sunday week. Its query
+covers the end date's week plus one to four preceding calendar weeks, for at
+most 35 inclusive days, and compares the newest available candidate with the
+preceding candidates. This is the only long-run classification rule. The module
+does not classify effort, estimate metrics, interpret health data, or recommend
+training.
+
 ## Recovery response boundary
 
 Milestone 4 made one read-only structural call for each daily recovery endpoint,
@@ -161,7 +206,7 @@ Codex host
     │ starts garminconnect-mcp serve
     ▼
 FastMCP stdio server
-    │ lists 17 MCP tools without contacting Garmin
+    │ lists 21 MCP tools without contacting Garmin
     │ invokes only an explicitly selected tool
     ▼
 Saved-token Garmin client
@@ -170,7 +215,7 @@ Saved-token Garmin client
 Neither configuration contains Garmin credentials, tokens, MFA values, or a
 repository-local token path. The untracked host configuration stores the
 absolute executable path and `serve` argument; authentication keeps using the
-external default token directory. All 17 tools remain discoverable so future
+external default token directory. All 21 tools remain discoverable so future
 milestones can use the same connection, but the project policy prompts before
 tools by default; only `garmin_connection_status` and `garmin_ping` have
 automatic approval.
@@ -229,7 +274,7 @@ deliberate MCP 2.x migration remains a possible later change.
 
 ## Existing MCP tools
 
-The server exposes 17 tools.
+The server exposes 21 tools.
 
 | Tool | Kind | Current behavior | Specification status |
 | --- | --- | --- | --- |
@@ -245,6 +290,10 @@ The server exposes 17 tools.
 | `garmin_stress` | Read, normalized/private | Returns compact Garmin-native daily summary values | Milestone 4 complete |
 | `garmin_recent_activities` | Read, normalized/private | Returns bounded, optionally running-only activity summaries with explicit units and null unavailable fields | Milestone 3 scope implemented and manually verified |
 | `garmin_activity` | Read, normalized/private | Returns the same stable schema for one numeric activity ID | Milestone 3 scope implemented and manually verified |
+| `garmin_running_activities_by_date` | Read, normalized/private | Returns running activities for an inclusive range of at most 42 days | Milestone 5 complete |
+| `garmin_weekly_running_summary` | Read, aggregate/private | Returns weekly meter/second/count facts, coverage, and longest runs | Milestone 5 complete |
+| `garmin_compare_running_weeks` | Read, aggregate/private | Compares adjacent Monday-Sunday weeks with absolute deltas and coverage | Milestone 5 complete |
+| `garmin_compare_recent_long_runs` | Read, aggregate/private | Compares weekly greatest-distance candidates across at most five weeks | Milestone 5 complete |
 | `garmin_workouts` | Read, summarized | Returns ID, name, sport, and estimated duration | Substantially covers FR-09 |
 | `garmin_scheduled_workouts` | Read, summarized | Returns one calendar month's scheduled workouts | Substantially covers FR-10 |
 | `garmin_schedule_workout` | Write | Schedules an existing template and summarizes the result | Partial FR-12; no local date validation or duplicate protection |
@@ -291,13 +340,19 @@ fields, discarded sample arrays, malformed shapes, authentication, rate limits,
 and endpoint failures. At the manual-verification stopping point, the full suite
 contains 84 passing tests.
 
+Milestone 5 adds synthetic tests for strict 42-day bounds, running-filtered date
+retrieval, normalization, empty weeks, missing dates and measurements, partial
+coverage, deterministic longest-run selection, adjacent-week validation,
+week-over-week deltas, recent weekly longest-run comparisons, and MCP wrappers.
+At the manual-verification stopping point, the suite contains 105 passing tests.
+
 ## Gap analysis against `PROJECT_SPEC.md`
 
 | Requirement | Current state | Gap |
 | --- | --- | --- |
 | FR-01 Authentication | Partial | Saved-token login, MFA, and a dedicated login command exist. Live persistence and refresh behavior remain unverified. |
 | FR-02 Connection verification | Implemented | Both `garmin_ping` and a duplicate status tool exist. Live behavior remains for Milestone 1/2 verification. |
-| FR-03 Recent activities | Milestone 3 complete | Compact explicit-unit pagination and running filtering were manually verified. Date-range support belongs to Milestone 5. |
+| FR-03 Recent activities | Milestone 3 complete | Compact explicit-unit pagination and running filtering were manually verified; Milestone 5 adds bounded date ranges. |
 | FR-04 Activity details | Milestone 3 complete | One-activity normalized lookup, unavailable fields, and safe unknown-ID handling are implemented; normalized live details were manually verified. |
 | FR-05 Daily recovery | Milestone 4 complete | Compact daily statistics, heart rate, stress, and related factual summaries use explicit units and null unavailable fields. |
 | FR-06 Sleep | Milestone 4 complete | Compact second-based stages, UTC times, and Garmin score/status are normalized without detailed arrays. |
@@ -309,7 +364,7 @@ contains 84 passing tests.
 | FR-12 Schedule workout | Partial | The pass-through write exists; date validation, idempotency, duplicate protection, explicit units/timezone rules, and live verification do not. |
 | FR-13 Create and schedule | Partial | The two calls exist, but arbitrary Garmin JSON is accepted and partial failure can leave an uploaded template behind. |
 | FR-14 Unschedule workout | Partial | The pass-through operation exists; identifier validation, error mapping, and live verification do not. |
-| Training summaries | Missing | No weekly aggregation, longest-run comparison, session classification, or week-over-week calculations. |
+| Training summaries | Milestone 5 complete | Bounded running retrieval, weekly aggregates with coverage, longest-run selection, and week comparisons were manually verified without coaching interpretation. |
 | Weekly planner | Missing | No proposal model or deterministic planning constraints. |
 | Provider boundary | Partial | Activity and recovery calls have clear provider seams; profile and workout families still directly depend on the Garmin client. |
 | Normalized domain models | Partial | Activities, recovery data, and workout-list summaries are normalized; profile and later planning domains are not. |
@@ -328,7 +383,8 @@ it should be extended rather than rewritten. The roadmap order remains suitable:
 3. Activity normalization and its provider seam were completed and manually
    verified in Milestone 3.
 4. Recovery normalization and manual Garmin comparison completed Milestone 4.
-5. Stop after Milestone 4; Milestone 5 must begin only when explicitly requested.
+5. Milestone 5 running summaries were implemented and manually verified.
+6. Stop after Milestone 5; Milestone 6 must begin only when explicitly requested.
 
 The MCP dependency incompatibility was resolved in Milestone 1 with an upper
 bound rather than a framework migration.

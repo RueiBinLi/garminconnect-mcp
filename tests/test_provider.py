@@ -43,6 +43,22 @@ class SyntheticClient:
         self.calls.append(("get_activity", (activity_id,), {}))
         return self._result()
 
+    def get_activities_by_date(
+        self,
+        startdate: str,
+        enddate: str | None = None,
+        activitytype: str | None = None,
+        sortorder: str | None = None,
+    ) -> Any:
+        self.calls.append(
+            (
+                "get_activities_by_date",
+                (startdate, enddate),
+                {"activitytype": activitytype, "sortorder": sortorder},
+            )
+        )
+        return self._result()
+
 
 def provider(client: SyntheticClient) -> GarminActivityProvider:
     return GarminActivityProvider(lambda: client)
@@ -155,3 +171,56 @@ def test_provider_preserves_malformed_response_category() -> None:
         provider(SyntheticClient(response={"unexpected": "shape"})).recent_activities(
             start=0, limit=5, running_only=False
         )
+
+
+def test_running_activities_by_date_uses_bounded_filtered_endpoint() -> None:
+    client = SyntheticClient(
+        response=[
+            {
+                "activityId": 9000000014,
+                "startTimeLocal": "2030-04-01 06:00:00",
+                "activityType": {"typeKey": "running"},
+            },
+            {
+                "activityId": 9000000015,
+                "startTimeLocal": "2030-04-02 06:00:00",
+                "activityType": {"typeKey": "cycling"},
+            },
+            {
+                "activityId": 9000000016,
+                "startTimeLocal": "2030-05-13 06:00:00",
+                "activityType": {"typeKey": "running"},
+            },
+        ]
+    )
+
+    result = provider(client).running_activities_by_date("2030-04-01", "2030-05-12")
+
+    assert [item["activity_id"] for item in result] == ["9000000014"]
+    assert client.calls == [
+        (
+            "get_activities_by_date",
+            ("2030-04-01", "2030-05-12"),
+            {"activitytype": "running", "sortorder": "asc"},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("start_date", "end_date"),
+    [
+        ("2030-4-01", "2030-04-02"),
+        ("2030-02-30", "2030-04-02"),
+        ("2030-04-02", "2030-04-01"),
+        ("2030-04-01", "2030-05-13"),
+    ],
+)
+def test_running_activities_by_date_rejects_invalid_ranges(
+    start_date: str, end_date: str
+) -> None:
+    client = SyntheticClient(response=[])
+
+    with pytest.raises(InvalidActivityRequestError):
+        provider(client).running_activities_by_date(start_date, end_date)
+
+    assert client.calls == []

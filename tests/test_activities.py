@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from garminconnect_mcp.activities import (
@@ -7,6 +9,7 @@ from garminconnect_mcp.activities import (
     activity_is_running,
     activity_items,
     normalize_activity,
+    normalized_activity_date,
 )
 
 
@@ -119,3 +122,19 @@ def test_activity_is_running_recognizes_running_variants(
         )
         is False
     )
+
+
+def test_normalized_activity_date_prefers_local_and_handles_unavailable() -> None:
+    activity = normalize_activity(
+        {
+            "activityId": 9000000007,
+            "startTimeLocal": "2030-04-12 06:30:00",
+            "startTimeGMT": "2030-04-11 22:30:00",
+        }
+    )
+
+    assert normalized_activity_date(activity) == date(2030, 4, 12)
+    activity["start_time_local"] = "malformed"
+    assert normalized_activity_date(activity) == date(2030, 4, 11)
+    activity["start_time_gmt"] = None
+    assert normalized_activity_date(activity) is None

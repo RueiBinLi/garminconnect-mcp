@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 
 from garminconnect_mcp import server
-from garminconnect_mcp.provider import InvalidRecoveryRequestError
+from garminconnect_mcp.provider import (
+    InvalidActivityRequestError,
+    InvalidRecoveryRequestError,
+)
 
 
 class FakeDate:
@@ -92,6 +95,30 @@ class FakeClient:
                 "distance": 5000.0,
                 "duration": 1500.0,
                 "averageSpeed": 3.333333333,
+            }
+        ]
+
+    def get_activities_by_date(
+        self,
+        startdate: str,
+        enddate: str | None = None,
+        activitytype: str | None = None,
+        sortorder: str | None = None,
+    ) -> list[dict[str, object]]:
+        self.calls.append(
+            (
+                "get_activities_by_date",
+                (startdate, enddate),
+                {"activitytype": activitytype, "sortorder": sortorder},
+            )
+        )
+        return [
+            {
+                "activityId": 123,
+                "startTimeLocal": f"{startdate} 06:00:00",
+                "activityType": {"typeKey": "running"},
+                "distance": 5000.0,
+                "duration": 1500.0,
             }
         ]
 
@@ -332,6 +359,88 @@ def test_recent_activities_requests_running_filter(fake_client: FakeClient) -> N
     assert fake_client.calls == [
         ("get_activities", (0, 5), {"activitytype": "running"})
     ]
+
+
+def test_running_activities_by_date_returns_normalized_range(
+    fake_client: FakeClient,
+) -> None:
+    result = server.garmin_running_activities_by_date("2030-04-01", "2030-04-07")
+
+    assert result["inclusive"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["distance_m"] == 5000.0
+    assert fake_client.calls == [
+        (
+            "get_activities_by_date",
+            ("2030-04-01", "2030-04-07"),
+            {"activitytype": "running", "sortorder": "asc"},
+        )
+    ]
+
+
+def test_weekly_summary_and_comparison_use_only_activity_date_endpoint(
+    fake_client: FakeClient,
+) -> None:
+    summary = server.garmin_weekly_running_summary("2030-04-01", "2030-04-07")
+    comparison = server.garmin_compare_running_weeks("2030-04-08", "2030-04-01")
+
+    assert summary["weeks"][0]["distance_m"] == 5000.0
+    assert summary["longest_run"]["activity_id"] == "123"
+    assert comparison["distance_change_m"] == -5000.0
+    assert [call[0] for call in fake_client.calls] == [
+        "get_activities_by_date",
+        "get_activities_by_date",
+    ]
+
+
+def test_recent_long_run_comparison_is_bounded_and_read_only(
+    fake_client: FakeClient,
+) -> None:
+    result = server.garmin_compare_recent_long_runs("2030-05-12", limit=3)
+
+    assert result["start_date"] == "2030-04-15"
+    assert result["rule"].startswith("greatest supplied distance")
+    assert result["latest_long_run"]["activity_id"] == "123"
+    assert fake_client.calls == [
+        (
+            "get_activities_by_date",
+            ("2030-04-15", "2030-05-12"),
+            {"activitytype": "running", "sortorder": "asc"},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("current", "previous"),
+    [
+        ("2030-04-09", "2030-04-02"),
+        ("2030-04-08", "2030-03-25"),
+        ("2030-4-08", "2030-04-01"),
+    ],
+)
+def test_week_comparison_rejects_invalid_week_starts_before_garmin(
+    fake_client: FakeClient, current: str, previous: str
+) -> None:
+    with pytest.raises(InvalidActivityRequestError, match="week"):
+        server.garmin_compare_running_weeks(current, previous)
+    assert fake_client.calls == []
+
+
+@pytest.mark.parametrize("limit", [0, 5, True])
+def test_recent_long_run_comparison_rejects_invalid_limit_before_garmin(
+    fake_client: FakeClient, limit: int
+) -> None:
+    with pytest.raises(InvalidActivityRequestError, match="limit"):
+        server.garmin_compare_recent_long_runs("2030-05-12", limit)
+    assert fake_client.calls == []
+
+
+def test_recent_long_run_comparison_rejects_date_underflow_before_garmin(
+    fake_client: FakeClient,
+) -> None:
+    with pytest.raises(InvalidActivityRequestError, match="too early"):
+        server.garmin_compare_recent_long_runs("0001-01-01", 4)
+    assert fake_client.calls == []
 
 
 def test_garmin_workouts_returns_summary(fake_client: FakeClient) -> None:

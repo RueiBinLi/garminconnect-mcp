@@ -84,9 +84,9 @@ After installing the project environment and completing the saved-token login:
 5. Ask Codex to run only `garmin_connection_status` (or `garmin_ping`). A
    successful result is `{"ok": true}`.
 
-See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) for the focused,
-read-only Milestone 4 recovery acceptance checklist. Do not invoke profile,
-activity, workout, scheduled-workout, or training-plan tools during that check.
+[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) records the completed,
+read-only Milestone 5 running-summary acceptance checklist and its privacy
+boundary.
 
 Claude config files are included too:
 
@@ -125,6 +125,10 @@ Normalized read-only activity tools:
 
 - `garmin_recent_activities(start=0, limit=10, running_only=false)`
 - `garmin_activity(activity_id)`
+- `garmin_running_activities_by_date(start_date, end_date)`
+- `garmin_weekly_running_summary(start_date, end_date)`
+- `garmin_compare_running_weeks(current_week_start, previous_week_start)`
+- `garmin_compare_recent_long_runs(end_date, limit=3)`
 
 Summarized workout tools:
 
@@ -153,6 +157,35 @@ Activity responses are normalized behind a Garmin provider boundary and never
 return raw chart, polyline, owner, profile-image, role, or privacy metadata.
 Invalid pagination, unknown IDs, malformed responses, authentication failures,
 rate limits, and endpoint failures produce bounded, secret-safe errors.
+
+Milestone 5 date ranges are inclusive, require strict `YYYY-MM-DD`, and contain
+at most 42 days. Retrieval uses Garmin's running-filtered date endpoint, which
+handles pagination inside the existing Garmin dependency, then verifies the
+normalized activity type at the provider boundary. The tools never request
+profiles, recovery, workouts, schedules, or training plans.
+
+Weekly summaries use Monday through Sunday calendar weeks and include clipped
+range boundaries for partial first or last weeks. They return running activity
+count, distance in meters, duration in seconds, the range's longest measured-
+distance run, and each week's longest measured-distance run. Activities without
+a usable local or GMT start date remain visible in unassigned coverage counts
+but are not silently placed in a week.
+
+Known measurements are summed even when other activities lack the field, with
+available/unavailable counts and a completeness flag beside each total. If all
+activities in a non-empty week lack distance or duration, that total is `null`;
+an empty week has a factual zero total. Missing values are never treated as
+zero. Week-over-week changes are absolute meter/second/count differences, and
+completeness flags expose partial comparisons.
+
+For recent long-run comparison, the deterministic rule is the greatest supplied
+`distance_m` in each Monday-Sunday week. The bounded query covers the week
+containing the end date plus the requested one to four preceding calendar weeks
+(at most 35 inclusive days). The most recent available weekly candidate is
+compared with the preceding candidates. Weeks without a supplied distance have
+no candidate, duration changes remain `null` if unavailable, and the output
+contains facts only—not session labels, coaching recommendations, or medical
+interpretation.
 
 Recovery tools return compact factual measurements only. Daily statistics use
 meters, seconds, kcal, and bpm. Heart-rate summaries use bpm; sleep and sleep

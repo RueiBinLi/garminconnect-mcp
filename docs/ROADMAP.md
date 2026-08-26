@@ -225,13 +225,20 @@ Let Codex reason effectively about several weeks of running.
 
 ## Tasks
 
-* [ ] Ensure date-range activity retrieval is practical.
-* [ ] Ensure normalized output is compact enough for multi-week queries.
-* [ ] Add helper functions where repeated calculations justify them.
-* [ ] Support weekly distance summaries.
-* [ ] Support longest-run identification.
-* [ ] Support week-over-week comparison.
-* [ ] Add tests for aggregation logic.
+* [x] Add strict inclusive date-range retrieval with a conservative 42-day cap.
+* [x] Use the existing compact canonical activity schema for multi-week queries.
+* [x] Keep Garmin parsing in the provider/normalization boundary.
+* [x] Add pure weekly distance, duration, count, and coverage aggregation.
+* [x] Add deterministic longest-run identification from supplied distance.
+* [x] Add adjacent week-over-week comparison.
+* [x] Add bounded recent weekly longest-run comparison.
+* [x] Add synthetic tests for aggregation, missing data, validation, and errors.
+* [x] Complete user manual verification against Garmin Connect.
+
+Status: completed on 2026-08-26. The user confirmed all observable live cases:
+bounded running retrieval, weekly facts, adjacent-week comparison, longest-run
+identification, recent weekly longest-run comparison, empty ranges, and
+unavailable fields. No Garmin write or delete operation was used.
 
 ## Manual Tests
 
@@ -248,6 +255,15 @@ Compare this week's running volume with last week's.
 ```text
 Compare my latest long run with my previous three long runs.
 ```
+
+Manual acceptance:
+
+* [x] One recent bounded running range matches Garmin Connect.
+* [x] One weekly distance, duration, and count summary matches.
+* [x] One adjacent week-over-week comparison matches.
+* [x] The bounded range's longest run is identified correctly.
+* [x] The latest weekly longest-run comparison follows the documented rule.
+* [x] Empty ranges and unavailable measurements retain explicit coverage.
 
 ---
 

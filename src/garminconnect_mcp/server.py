@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -11,7 +11,16 @@ from dotenv import load_dotenv
 from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
 
-from .provider import GarminActivityProvider, GarminRecoveryProvider
+from .provider import (
+    GarminActivityProvider,
+    GarminRecoveryProvider,
+    InvalidActivityRequestError,
+)
+from .training import (
+    compare_recent_weekly_longest_runs,
+    compare_week_summaries,
+    summarize_running_weeks,
+)
 
 mcp = FastMCP("Garmin Connect")
 
@@ -318,6 +327,110 @@ def garmin_activity(activity_id: str) -> dict[str, Any]:
     spm. Missing Garmin fields are returned as null.
     """
     return _activity_provider().activity(activity_id)
+
+
+@mcp.tool()
+def garmin_running_activities_by_date(start_date: str, end_date: str) -> dict[str, Any]:
+    """List normalized runs in an inclusive YYYY-MM-DD range of at most 42 days.
+
+    Measurements use meters, seconds, seconds per kilometer, bpm, spm, and
+    meters of elevation gain. Missing fields are null. The Garmin endpoint is
+    running-filtered and results are checked again after normalization. Read-only.
+    """
+    items = _activity_provider().running_activities_by_date(start_date, end_date)
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "inclusive": True,
+        "count": len(items),
+        "items": items,
+    }
+
+
+@mcp.tool()
+def garmin_weekly_running_summary(start_date: str, end_date: str) -> dict[str, Any]:
+    """Summarize runs by Monday-Sunday week for an inclusive range up to 42 days.
+
+    Dates require strict YYYY-MM-DD. Totals use distance_m and duration_s;
+    counts and coverage show missing measurements. A total is null when every
+    activity lacks that measurement, while an empty week totals zero. Longest
+    runs require supplied distance. No interpretation is added. Read-only.
+    """
+    items = _activity_provider().running_activities_by_date(start_date, end_date)
+    return summarize_running_weeks(items, start_date, end_date)
+
+
+@mcp.tool()
+def garmin_compare_running_weeks(
+    current_week_start: str, previous_week_start: str
+) -> dict[str, Any]:
+    """Compare two adjacent Monday-Sunday running weeks using YYYY-MM-DD starts.
+
+    The previous start must be exactly seven days before the current start.
+    Distance changes use meters and duration changes use seconds. Coverage
+    flags expose partial totals caused by unavailable fields. Read-only.
+    """
+    try:
+        current = date.fromisoformat(current_week_start)
+        previous = date.fromisoformat(previous_week_start)
+    except (TypeError, ValueError):
+        current = previous = date.min
+    if (
+        current.isoformat() != current_week_start
+        or previous.isoformat() != previous_week_start
+        or current.weekday() != 0
+        or previous.weekday() != 0
+    ):
+        raise InvalidActivityRequestError(
+            "week starts must be valid YYYY-MM-DD Mondays"
+        )
+    if previous + timedelta(days=7) != current:
+        raise InvalidActivityRequestError(
+            "previous_week_start must be exactly seven days before current_week_start"
+        )
+
+    end_date = (current + timedelta(days=6)).isoformat()
+    items = _activity_provider().running_activities_by_date(
+        previous_week_start, end_date
+    )
+    weeks = summarize_running_weeks(items, previous_week_start, end_date)["weeks"]
+    return compare_week_summaries(weeks[0], weeks[1])
+
+
+@mcp.tool()
+def garmin_compare_recent_long_runs(end_date: str, limit: int = 3) -> dict[str, Any]:
+    """Compare the latest weekly longest run with up to 1-4 preceding candidates.
+
+    The lookback covers the current partial week plus limit preceding calendar
+    weeks and ends on strict YYYY-MM-DD end_date (at most 35 days for limit 4).
+    A long run is the greatest supplied distance_m in a Monday-Sunday week;
+    distance changes use meters and duration changes use seconds. Weeks without
+    supplied distance have no candidate, and unavailable duration changes are
+    null. This is factual and read-only.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 4:
+        raise InvalidActivityRequestError("limit must be between 1 and 4")
+    try:
+        end = date.fromisoformat(end_date)
+    except (TypeError, ValueError):
+        end = date.min
+    if end.isoformat() != end_date:
+        raise InvalidActivityRequestError("end_date must use valid YYYY-MM-DD format")
+    try:
+        current_week_start = end - timedelta(days=end.weekday())
+        start_date = (current_week_start - timedelta(days=limit * 7)).isoformat()
+    except OverflowError as exc:
+        raise InvalidActivityRequestError(
+            "end_date is too early for the requested comparison range"
+        ) from exc
+    items = _activity_provider().running_activities_by_date(start_date, end_date)
+    result = compare_recent_weekly_longest_runs(items, start_date, end_date, limit)
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "requested_preceding_limit": limit,
+        **result,
+    }
 
 
 @mcp.tool()
