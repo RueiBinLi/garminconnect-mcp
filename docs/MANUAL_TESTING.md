@@ -1,4 +1,146 @@
-# Manual Milestone 6 Workout-Read Verification
+# Manual Milestone 7 Offline Workout-Preview Verification
+
+Milestone 7 was completed and manually verified on 2026-08-27 using only local
+synthetic previews. No Garmin client/account operation occurred, no payload was
+saved, and Milestone 8 was not started. No step below needs Garmin
+authentication or a Garmin client.
+
+## Safety and privacy boundary
+
+Use only `garmin_preview_running_workout`. Do not invoke profile, activity,
+recovery, workout-read, training-plan, upload, create, schedule, modify,
+reschedule, unschedule, or delete operations. The preview tool has no Garmin
+provider/client path and cannot affect an account, watch, or calendar.
+
+Use only the synthetic definitions below. Do not substitute real workout names,
+descriptions, dates, identifiers, account data, credentials, tokens, session
+files, or Garmin payloads. Do not save the internal serialized Garmin payload;
+the MCP tool intentionally does not return it.
+
+## Semantics to verify
+
+- `sport_type` is fixed to `running`.
+- Executable `step_type` values are `warmup`, `run`, `recovery`, and `cooldown`;
+  `repeat` contains `repeat_count` plus a non-empty nested `steps` sequence.
+- Durations use exactly one of `duration_s`, `distance_m`, or open-ended with no
+  measurement. Targets are omitted/no-target, an integer bpm range, or a pace
+  range in seconds per kilometer.
+- `expanded_steps` presents the actual repeated execution order with consecutive
+  one-based `order` values.
+- Known duration and distance subtotals are always explicit. A complete total is
+  `null` when distance, time, or open steps make it indeterminate, and its
+  completeness flag is false.
+- Every successful response says `preview_only`, `uploaded=false`, and
+  `scheduled=false`. It contains no Garmin enum IDs or full Garmin JSON.
+
+## Synthetic preview calls
+
+1. Simple time-based workout:
+
+```json
+{
+  "definition": {
+    "name": "Synthetic Time Preview",
+    "steps": [
+      {"step_type": "warmup", "duration": {"duration_type": "time", "duration_s": 300}},
+      {"step_type": "run", "duration": {"duration_type": "time", "duration_s": 1200}},
+      {"step_type": "cooldown", "duration": {"duration_type": "time", "duration_s": 300}}
+    ]
+  }
+}
+```
+
+Confirm three expanded steps, `known_duration_s=1800`,
+`total_duration_s=1800`, duration completeness true,
+`known_distance_m=0`, `total_distance_m=null`, and distance completeness false.
+
+2. Distance-based workout:
+
+```json
+{
+  "definition": {
+    "name": "Synthetic Distance Preview",
+    "steps": [
+      {"step_type": "warmup", "duration": {"duration_type": "distance", "distance_m": 1000}},
+      {"step_type": "run", "duration": {"duration_type": "distance", "distance_m": 3000}},
+      {"step_type": "cooldown", "duration": {"duration_type": "distance", "distance_m": 1000}}
+    ]
+  }
+}
+```
+
+Confirm three expanded steps, `known_distance_m=5000`,
+`total_distance_m=5000`, distance completeness true,
+`known_duration_s=0`, `total_duration_s=null`, and duration completeness false.
+
+3. Interval workout with repeats and both verified targets:
+
+```json
+{
+  "definition": {
+    "name": "Synthetic Interval Preview",
+    "steps": [
+      {"step_type": "warmup", "duration": {"duration_type": "time", "duration_s": 600}},
+      {
+        "step_type": "repeat",
+        "repeat_count": 3,
+        "steps": [
+          {
+            "step_type": "run",
+            "duration": {"duration_type": "distance", "distance_m": 400},
+            "target": {
+              "target_type": "pace_range",
+              "minimum_pace_s_per_km": 300,
+              "maximum_pace_s_per_km": 330
+            }
+          },
+          {
+            "step_type": "recovery",
+            "duration": {"duration_type": "time", "duration_s": 60},
+            "target": {
+              "target_type": "heart_rate_range",
+              "minimum_heart_rate_bpm": 120,
+              "maximum_heart_rate_bpm": 135
+            }
+          }
+        ]
+      },
+      {"step_type": "cooldown", "duration": {"duration_type": "open"}}
+    ]
+  }
+}
+```
+
+Confirm the expanded order is warmup, three alternating run/recovery pairs,
+then cooldown. The expanded count is eight, known duration is 780 seconds,
+known distance is 1200 meters, both complete totals are `null`, both
+completeness flags are false, and both targets retain their public units.
+
+4. Invalid definitions. Retry a small time preview once with `duration_s` set to
+the string `"300"`, once with it set to the Boolean `true`, and once with an
+unknown field. Confirm every call is rejected rather than coerced. Also confirm
+an empty `steps` list, an inverted heart-rate or pace range, and an empty repeat
+are rejected if the client makes those calls easy to enter.
+
+## Acceptance
+
+- [x] One simple time-based preview has correct normalized units and totals.
+- [x] One distance-based preview has correct normalized units and totals.
+- [x] One repeat preview has readable expanded step order and count.
+- [x] Heart-rate bpm and pace seconds/km targets remain explicit and correct.
+- [x] Known subtotals, complete totals, flags, and explicit `null` behavior are correct.
+- [x] Invalid, coercible, conflicting, and unsupported definitions are rejected.
+- [x] Responses contain no full Garmin payload or unrelated metadata.
+- [x] Every response confirms no upload or scheduling occurred.
+- [x] No Garmin upload, creation, scheduling, modification, unscheduling, or deletion occurred.
+- [x] No private value or raw payload was saved to durable output.
+
+The user confirmed this checklist passed. Milestone 7 is complete. Do not begin
+Milestone 8 without a separate explicit request.
+
+---
+
+# Historical Milestone 6 Workout-Read Verification
 
 Milestone 6 was completed and manually verified on 2026-08-27. The initial
 private comparison exposed a saved-page/UI count mismatch and MCP Boolean

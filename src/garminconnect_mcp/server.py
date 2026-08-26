@@ -23,6 +23,10 @@ from .training import (
     compare_week_summaries,
     summarize_running_weeks,
 )
+from .workout_builder import (
+    WorkoutDefinition,
+    preview_running_workout,
+)
 
 mcp = FastMCP("Garmin Connect")
 
@@ -451,6 +455,23 @@ def garmin_scheduled_workouts(start_date: str, end_date: str) -> dict[str, Any]:
         "count": len(items),
         "items": items,
     }
+
+
+@mcp.tool()
+def garmin_preview_running_workout(
+    definition: WorkoutDefinition,
+) -> dict[str, Any]:
+    """Validate and preview a structured running workout entirely offline.
+
+    Public measurements use duration_s, distance_m, heart_rate_bpm, and
+    pace_s_per_km fields. Supported executable steps are warmup, run, recovery,
+    and cooldown; bounded repeat groups may nest up to two levels. This tool
+    performs no Garmin client or network call, exposes no Garmin JSON payload,
+    and does not upload, create, schedule, modify, or delete anything.
+    """
+    if not isinstance(definition, WorkoutDefinition):
+        definition = WorkoutDefinition.model_validate(definition, strict=True)
+    return preview_running_workout(definition)
 
 
 @mcp.tool()

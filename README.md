@@ -85,7 +85,7 @@ After installing the project environment and completing the saved-token login:
    successful result is `{"ok": true}`.
 
 [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) records the completed,
-read-only Milestone 5 running-summary acceptance checklist and its privacy
+offline-only Milestone 7 workout-preview acceptance checklist and its privacy
 boundary.
 
 Claude config files are included too:
@@ -135,7 +135,11 @@ Normalized read-only workout tools:
 - `garmin_workouts(start=0, limit=20, running_only=false)`
 - `garmin_scheduled_workouts(start_date, end_date)`
 
-Legacy workout write tools (not part of Milestone 6):
+Offline pre-write workout tool:
+
+- `garmin_preview_running_workout(definition)`
+
+Legacy workout write tools (not part of Milestone 7):
 
 - `garmin_schedule_workout`
 - `garmin_create_scheduled_workout`
@@ -233,8 +237,33 @@ pages and ranges return zero counts and empty items. Invalid inputs, malformed
 known envelopes, authentication failures, rate limits, and endpoint failures
 produce bounded secret-safe errors.
 
-The legacy write tools are unchanged and remain outside Milestone 6. Do not use
-them during read-only workout verification.
+Milestone 7 adds a strict internal running-workout definition and an offline
+preview. A definition fixes `sport_type` to `running`, accepts a conservatively
+validated name and optional description, and contains ordered `warmup`, `run`,
+`recovery`, `cooldown`, or bounded `repeat` steps. Executable steps require
+exactly one time (`duration_s`), distance (`distance_m`), or open duration.
+Targets are optional and limited to no target, a custom heart-rate range in
+`heart_rate_bpm`, or a custom pace range in `pace_s_per_km`. Unknown fields,
+coercible strings, Booleans used as numbers, invalid ranges, non-finite values,
+unsupported combinations, unsafe nesting, and excessive expanded totals are
+rejected.
+
+The preview expands repeats into readable execution order and reports known and
+complete totals separately. A complete duration or distance total is `null`
+when another duration type makes that total indeterminate; the known subtotal
+and a completeness Boolean remain visible. The tool clearly reports
+`uploaded=false` and `scheduled=false`. It does not construct the Garmin client,
+make a network call, expose the Garmin payload, or reach any upload, create,
+schedule, modify, unschedule, or delete operation.
+
+Garmin enum IDs and payload keys live only in the dedicated serializer. The
+serializer is offline and internally testable for the installed client's
+verified running, step, end-condition, repeat, heart-rate, and pace mappings.
+Pace seconds per kilometer are converted to Garmin's wire speed only inside
+that boundary. The serializer is not connected to a write tool.
+
+The legacy write tools are unchanged and remain outside Milestone 7. Do not use
+them during workout-preview verification.
 
 ## Development
 

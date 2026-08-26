@@ -323,17 +323,17 @@ Create structured running workouts safely.
 
 ## Initial Supported Steps
 
-* [ ] warmup
-* [ ] run
-* [ ] recovery
-* [ ] cooldown
-* [ ] repeat
+* [x] warmup
+* [x] run
+* [x] recovery
+* [x] cooldown
+* [x] repeat
 
 ## Initial Supported Durations
 
-* [ ] time
-* [ ] distance
-* [ ] open-ended where Garmin supports it
+* [x] time using `duration_s`
+* [x] distance using `distance_m`
+* [x] open-ended using the verified lap-button condition
 
 ## Initial Supported Targets
 
@@ -341,22 +341,25 @@ Investigate and implement only verified Garmin-compatible targets.
 
 Potential targets:
 
-* [ ] no target
-* [ ] heart-rate range
-* [ ] pace range
+* [x] no target
+* [x] heart-rate range using integer bpm bounds
+* [x] pace range using seconds-per-kilometer bounds
 
 ## Tasks
 
-* [ ] Define internal workout schema.
-* [ ] Implement validation.
-* [ ] Implement Garmin serialization.
-* [ ] Add synthetic serialization tests.
-* [ ] Prevent malformed workout submission.
-* [ ] Provide readable pre-write representation.
+* [x] Define a strict internal running-workout schema with explicit units.
+* [x] Implement deterministic validation, expansion, and aggregation.
+* [x] Implement an internal Garmin serializer behind a dedicated boundary.
+* [x] Add synthetic serialization, invalid-input, and boundary tests.
+* [x] Reject malformed and unsupported definitions before any client call.
+* [x] Provide `garmin_preview_running_workout` without Garmin JSON or network access.
+* [x] Complete the manual offline preview checklist.
 
 ## Done When
 
-A workout can be generated deterministically from an internal definition.
+A workout can be generated deterministically from an internal definition. The
+implementation, offline automated checks, and manual preview checklist are
+complete.
 
 Do not schedule it yet.
 
