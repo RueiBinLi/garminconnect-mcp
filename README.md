@@ -139,6 +139,10 @@ Offline pre-write workout tool:
 
 - `garmin_preview_running_workout(definition)`
 
+Validated workout-creation tool:
+
+- `garmin_create_running_workout(definition, confirmed=false)`
+
 Legacy workout write tools (not part of Milestone 7):
 
 - `garmin_schedule_workout`
@@ -264,6 +268,32 @@ that boundary. The serializer is not connected to a write tool.
 
 The legacy write tools are unchanged and remain outside Milestone 7. Do not use
 them during workout-preview verification.
+
+Milestone 8 connects the same strict `WorkoutDefinition` and deterministic
+serializer to one narrow creation boundary. `confirmed` is a strict JSON
+Boolean and defaults to `false`. An omitted or false confirmation validates the
+complete definition, constructs no Garmin client, performs no network request,
+and returns a compact reminder to use the existing preview before explicitly
+confirming. Arbitrary Garmin JSON, arrays, enum IDs, and unknown fields are not
+accepted by this tool.
+
+A confirmed invocation serializes the validated definition once and calls the
+installed client's workout upload method exactly once. It does not retry after
+an uncertain result and has no scheduling, modification, unscheduling,
+deletion, calendar, or device-push path. The response retains only `created`,
+`workout_id`, the validated name and running sport, complete duration/distance
+totals where determinable, `scheduled=false`, and a clear unscheduled message.
+Garmin response names, owner/account metadata, URLs, raw payloads, and unrelated
+identifiers are discarded. Authentication expiration, rate limits, endpoint
+failures, unsupported client behavior, malformed responses, and missing workout
+IDs become concise secret-safe errors.
+
+Milestone 8 was completed and manually verified on 2026-08-27 with exactly one
+explicitly approved synthetic creation. The workout was created successfully,
+opened normally, retained the intended running step order and durations, and
+remained unscheduled; no duplicate, calendar change, or device push occurred.
+Every future creation still requires a separately reviewed definition and
+explicit confirmation. See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
 
 ## Development
 

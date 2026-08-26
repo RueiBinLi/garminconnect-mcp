@@ -34,6 +34,11 @@ from .recovery import (
     normalize_stress,
     validate_date,
 )
+from .workout_builder import (
+    WorkoutDefinition,
+    aggregate_workout,
+    serialize_running_workout,
+)
 from .workouts import (
     MalformedWorkoutResponseError,
     NormalizedScheduledWorkout,
@@ -84,6 +89,8 @@ class GarminClient(Protocol):
     def get_stress_data(self, cdate: str) -> Any: ...
 
     def get_scheduled_workouts(self, year: int, month: int) -> Any: ...
+
+    def upload_workout(self, workout_json: dict[str, Any]) -> Any: ...
 
 
 class ActivityProviderError(RuntimeError):
@@ -339,6 +346,10 @@ class WorkoutResponseError(WorkoutProviderError):
     pass
 
 
+class WorkoutUnsupportedError(WorkoutProviderError):
+    pass
+
+
 class InvalidWorkoutRequestError(WorkoutProviderError, ValueError):
     pass
 
@@ -348,6 +359,39 @@ class GarminWorkoutProvider:
 
     def __init__(self, client_factory: Callable[[], GarminClient]) -> None:
         self._client_factory = client_factory
+
+    def create_running_workout(self, definition: WorkoutDefinition) -> dict[str, Any]:
+        payload = serialize_running_workout(definition)
+
+        def upload(client: GarminClient) -> Any:
+            upload_workout = getattr(client, "upload_workout", None)
+            if not callable(upload_workout):
+                raise WorkoutUnsupportedError(
+                    "Installed Garmin client does not support workout creation"
+                )
+            return upload_workout(payload)
+
+        raw = self._call("workout creation", upload)
+        try:
+            normalized = normalize_workout(raw)
+        except MalformedWorkoutResponseError as exc:
+            raise WorkoutResponseError(str(exc)) from exc
+        workout_id = normalized["workout_id"]
+        if workout_id is None:
+            raise WorkoutResponseError(
+                "Garmin workout creation response did not include a workout ID"
+            )
+        aggregates = aggregate_workout(definition)
+        return {
+            "created": True,
+            "workout_id": workout_id,
+            "name": definition.name,
+            "sport_type": definition.sport_type,
+            "total_duration_s": aggregates["total_duration_s"],
+            "total_distance_m": aggregates["total_distance_m"],
+            "scheduled": False,
+            "message": "Workout created in Garmin Connect but not scheduled.",
+        }
 
     def saved_workouts(
         self, *, start: int, limit: int, running_only: bool
@@ -457,6 +501,8 @@ class GarminWorkoutProvider:
     def _call(self, operation: str, callback: Callable[[GarminClient], Any]) -> Any:
         try:
             return callback(self._client_factory())
+        except WorkoutProviderError:
+            raise
         except GarminConnectAuthenticationError as exc:
             raise WorkoutAuthenticationError(
                 "Garmin authentication failed; refresh the saved login"

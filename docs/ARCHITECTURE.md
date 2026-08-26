@@ -12,8 +12,10 @@ normalized activities and was manually verified on 2026-08-26. Milestone 6
 adds read-only saved-workout and scheduled-workout boundaries and was manually
 verified on 2026-08-27. Milestone 7 adds an offline-only validated running-
 workout builder, deterministic Garmin serializer, and safe preview tool. Its
-offline preview behavior was manually verified on 2026-08-27 and is not
-connected to Garmin writes.
+offline preview behavior was manually verified on 2026-08-27. Milestone 8 adds
+a confirmation-gated, exactly-one upload boundary for validated running
+workouts. One explicitly approved synthetic creation and manual Garmin
+verification passed on 2026-08-27. Scheduling is not part of this milestone.
 
 ## Repository structure
 
@@ -43,8 +45,8 @@ garminconnect-mcp/
 └── .gitignore                       # Local secret/build/cache exclusions
 ```
 
-The implementation remains intentionally small. Activity, recovery, and
-workout-read behavior have provider seams and pure normalizers; other runtime
+The implementation remains intentionally small. Activity, recovery, workout
+reads, and validated workout creation have provider seams; other runtime
 behavior still lives in `server.py`. `training.py` performs factual aggregation
 only; there is no coaching or planning module. `workout_builder.py` is a pure
 offline boundary and cannot obtain a Garmin client.
@@ -80,10 +82,10 @@ point remains `garminconnect-mcp = garminconnect_mcp.server:main`. With no
 command, or with `serve`, `main()` calls `mcp.run()` over stdio. Authentication,
 token reuse, and stdio startup are unchanged.
 
-Activity, recovery, and workout-read MCP tools no longer depend on Garmin
-response keys or exception text. The legacy workout write tools are unchanged;
-they still call the third-party client directly and retain their existing
-summary behavior.
+Activity, recovery, workout-read, and validated-creation MCP tools no longer
+depend on Garmin response keys or exception text. The legacy workout write
+tools are unchanged; they still call the third-party client directly and retain
+their existing summary behavior.
 
 ## Activity response boundary
 
@@ -320,6 +322,45 @@ inside Python and is never returned by MCP. The preview exposes only normalized
 input, expanded order, aggregates, and compact classification/count diagnostics,
 plus explicit `uploaded=false` and `scheduled=false` state.
 
+## Milestone 8 validated creation boundary
+
+```text
+garmin_create_running_workout(definition, confirmed=false)
+    │ exact Milestone 7 strict validation happens first
+    ├── false/omitted ──► compact no-write result; no client construction
+    │
+    └── true
+          │ deterministic Milestone 7 serializer output only
+          ▼
+    GarminWorkoutProvider.create_running_workout
+          │ one upload_workout call; no retry
+          ▼
+    compact normalized created result
+          │ workout ID + validated facts only
+          └── scheduled=false; no calendar/device operation
+```
+
+FastMCP requires `confirmed` to be a strict JSON Boolean. The tool also checks
+the type for direct Python calls. The whole `WorkoutDefinition` is validated
+before `_workout_provider()` can obtain the cached Garmin client. A false or
+omitted confirmation returns `created=false` and directs the caller back to the
+preview. A true confirmation crosses the provider boundary once.
+
+The provider alone can see the deterministic Garmin payload and raw upload
+response. It calls only `upload_workout`; it has no automatic retry,
+verification read, rollback, scheduling, modification, unscheduling, deletion,
+or device-push step. If the result is malformed or lacks a usable workout ID,
+the error is reported without trying to repair or delete the possibly created
+template. The caller must manually inspect Garmin before deciding what to do.
+
+Successful output contains only creation state, the normalized workout ID, the
+validated name and fixed running sport, complete duration/distance totals when
+available, `scheduled=false`, and an unscheduled message. Raw requests and
+responses, account/owner fields, URLs, response-provided names, and unrelated
+identifiers are discarded. Authentication, rate-limit, endpoint, unsupported-
+client, malformed-response, and missing-ID failures use stable secret-safe
+errors.
+
 ## Codex integration
 
 Milestone 2 registers the server in the local Codex host configuration and adds
@@ -334,7 +375,7 @@ Codex host
     │ starts garminconnect-mcp serve
     ▼
 FastMCP stdio server
-    │ lists 22 MCP tools without contacting Garmin
+    │ lists 23 MCP tools without contacting Garmin
     │ invokes only an explicitly selected tool
     ▼
 Saved-token Garmin client
@@ -343,7 +384,7 @@ Saved-token Garmin client
 Neither configuration contains Garmin credentials, tokens, MFA values, or a
 repository-local token path. The untracked host configuration stores the
 absolute executable path and `serve` argument; authentication keeps using the
-external default token directory. All 22 tools remain discoverable so future
+external default token directory. All 23 tools remain discoverable so future
 milestones can use the same connection, but the project policy prompts before
 tools by default; only `garmin_connection_status` and `garmin_ping` have
 automatic approval.
@@ -403,7 +444,7 @@ deliberate MCP 2.x migration remains a possible later change.
 
 ## Existing MCP tools
 
-The server exposes 22 tools.
+The server exposes 23 tools.
 
 | Tool | Kind | Current behavior | Specification status |
 | --- | --- | --- | --- |
@@ -426,6 +467,7 @@ The server exposes 22 tools.
 | `garmin_workouts` | Read, normalized/private | Returns one bounded page with Garmin running-only filtering, a defensive normalized check, and explicit units/nulls | Milestone 6 complete |
 | `garmin_scheduled_workouts` | Read, normalized/private | Returns scheduled workouts for an inclusive range of at most 31 calendar days | Milestone 6 complete |
 | `garmin_preview_running_workout` | Offline pre-write | Strictly validates, expands, and aggregates a running-workout definition without a Garmin client or full serialized payload | Milestone 7 complete |
+| `garmin_create_running_workout` | Confirmation-gated write | Validates first; false/omitted confirmation makes no client call, while true uploads exactly one serializer-produced running workout and never schedules it | Milestone 8 complete and manually verified |
 | `garmin_schedule_workout` | Write | Schedules an existing template and summarizes the result | Partial FR-12; no local date validation or duplicate protection |
 | `garmin_create_scheduled_workout` | Write | Uploads arbitrary Garmin JSON, then schedules it | Partial FR-11/FR-13; no internal schema, validation, rollback, or duplicate protection |
 | `garmin_unschedule_workout` | Write/destructive | Removes a calendar assignment by scheduled-workout ID | Basic FR-14 behavior exists |
@@ -493,6 +535,17 @@ offline MCP calls. Client-construction and write-method reachability are guarded
 by tests. At the manual-verification stopping point, the full suite contains
 234 passing tests.
 
+Milestone 8 adds synthetic provider and MCP tests for false/omitted
+confirmation, strict Boolean intent, validation-before-client construction,
+arbitrary-payload rejection, exact deterministic serialization, one-call/no-
+retry behavior, compact privacy-filtered results, malformed and missing-ID
+responses, secret-safe failure mapping, unsupported client behavior, and the
+absence of scheduling, modification, unscheduling, deletion, rollback, and
+device-push reachability. All automated paths remain offline.
+At completion, the full suite contains 263 passing tests. One explicitly
+approved synthetic creation and the manual Garmin acceptance checklist passed
+without recording its private identifier or raw response.
+
 ## Gap analysis against `PROJECT_SPEC.md`
 
 | Requirement | Current state | Gap |
@@ -507,18 +560,18 @@ by tests. At the manual-verification stopping point, the full suite contains
 | FR-08 Body Battery | Milestone 4 complete | Compact Garmin-native charged, drained, high, low, and latest values are normalized. |
 | FR-09 Existing workouts | Milestone 6 complete | The provider matches the current UI's `myWorkoutsOnly`, one-based pagination, sport filtering, and ordering semantics; live count and running-filter comparisons passed. |
 | FR-10 Scheduled workouts | Milestone 6 complete | Inclusive ranges up to 31 calendar days hide Garmin's month endpoint and preserve verified date-only semantics; live comparison passed. |
-| FR-11 Create running workout | Milestone 7 pre-write portion complete | A strict running schema, deterministic serializer, and offline preview are implemented and manually verified. No validated creation/upload path is connected; that remains Milestone 8. |
+| FR-11 Create running workout | Milestone 8 complete | The strict schema and serializer connect to one confirmation-gated upload with compact output and no retry or scheduling path. One explicitly approved synthetic creation and manual Garmin verification passed. |
 | FR-12 Schedule workout | Partial | The pass-through write exists; date validation, idempotency, duplicate protection, explicit units/timezone rules, and live verification do not. |
 | FR-13 Create and schedule | Partial | The two calls exist, but arbitrary Garmin JSON is accepted and partial failure can leave an uploaded template behind. |
 | FR-14 Unschedule workout | Partial | The pass-through operation exists; identifier validation, error mapping, and live verification do not. |
 | Training summaries | Milestone 5 complete | Bounded running retrieval, weekly aggregates with coverage, longest-run selection, and week comparisons were manually verified without coaching interpretation. |
 | Weekly planner | Missing | No proposal model or deterministic planning constraints. |
-| Provider boundary | Partial | Activity, recovery, and workout reads have clear provider seams; profile and legacy workout writes still directly depend on the Garmin client. |
+| Provider boundary | Partial | Activity, recovery, workout reads, and validated running-workout creation have clear provider seams; profile and legacy workout writes still directly depend on the Garmin client. |
 | Normalized domain models | Partial | Activities, recovery data, workout reads, and pre-write running definitions use compact schemas; profile, connected writes, and later planning domains do not. |
-| Error handling | Partial | Activity, recovery, and workout-read failures use stable secret-safe categories; profile and legacy write families still propagate third-party errors. |
-| Write safety | Partial | The new builder validates and previews offline with bounded repeats/totals, but legacy writes remain unconnected and lack idempotency, bulk guards, or an application-level approval mechanism. |
+| Error handling | Partial | Activity, recovery, workout-read, and validated-creation failures use stable secret-safe categories; profile and legacy write families still propagate third-party errors. |
+| Write safety | Partial | Validated running creation requires strict explicit confirmation, uploads once without retry, and cannot schedule; legacy writes still lack these guarantees. |
 | Local-first/single-user | Implemented by design | The stdio process, local `.env`, and local token directory fit the target. |
-| Offline testability | Partial | Activity, recovery, training-summary, workout-read, and pre-write builder boundaries are covered with synthetic data; connected writes and planning still need coverage. |
+| Offline testability | Partial | Activity, recovery, training-summary, workout-read, builder, and validated-creation boundaries are covered with synthetic data; legacy writes and planning still need coverage. |
 
 ## Recommended milestone sequence
 
@@ -535,6 +588,9 @@ it should be extended rather than rewritten. The roadmap order remains suitable:
    2026-08-27.
 7. Milestone 7 workout building, serialization, and offline preview were
    implemented and manually verified on 2026-08-27.
+8. Milestone 8 validated creation, one explicitly approved synthetic upload,
+   and manual Garmin verification completed on 2026-08-27. Milestone 9 has not
+   started.
 
 The MCP dependency incompatibility was resolved in Milestone 1 with an upper
 bound rather than a framework migration.

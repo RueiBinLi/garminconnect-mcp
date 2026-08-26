@@ -1,4 +1,108 @@
-# Manual Milestone 7 Offline Workout-Preview Verification
+# Completed Milestone 8 Validated Workout-Creation Verification
+
+Milestone 8 was completed and manually verified on 2026-08-27. All required
+offline checks passed, followed by exactly one explicitly approved call to
+`garmin_create_running_workout` with the exact synthetic definition below and
+`confirmed=true`. The creation succeeded without a retry.
+
+## Offline safety boundary
+
+Before approval, use `garmin_preview_running_workout` or call
+`garmin_create_running_workout` only with `confirmed` omitted/false. Both paths
+must construct no Garmin client for creation and make no network or write call.
+The default creation response must say `created=false` and `scheduled=false`.
+
+Offline verification uses only synthetic fake clients. It proves that a
+confirmed call uploads the exact deterministic Milestone 7 serializer output
+once, filters the response, maps safe failures, performs no retry or rollback,
+and cannot reach scheduling, modification, unscheduling, deletion, calendar,
+or device-push methods.
+
+Run:
+
+```bash
+scripts/check-private-output.sh
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m compileall -q src
+```
+
+Also complete the offline stdio initialization/tool-discovery check and offline
+MCP calls for omitted/false confirmation and a confirmed fake-client upload.
+Never use a real account for automated tests.
+
+## Exact synthetic proposal that was approved
+
+Name: `MCP TEST - Easy Run`
+
+Sport: `running`
+
+Description: omitted
+
+Normalized ordered steps:
+
+1. `warmup`: time, `duration_s=300`, no target
+2. `run`: time, `duration_s=600`, no target
+3. `cooldown`: time, `duration_s=300`, no target
+
+Aggregates:
+
+- `expanded_step_count=3`
+- `known_duration_s=1200`
+- `total_duration_s=1200`
+- `duration_total_complete=true`
+- `known_distance_m=0`
+- `total_distance_m=null`
+- `distance_total_complete=false`
+
+The approval authorized exactly one unscheduled Garmin workout creation. It did
+not authorize scheduling, modification, deletion, device push, retry, or any
+calendar change. This proposal contains no repeats, pace target, heart-rate
+target, or Garmin JSON.
+
+## The one approved live call
+
+After explicit approval of that exact proposal, only this definition was
+invoked:
+
+```json
+{
+  "definition": {
+    "name": "MCP TEST - Easy Run",
+    "sport_type": "running",
+    "steps": [
+      {"step_type": "warmup", "duration": {"duration_type": "time", "duration_s": 300}},
+      {"step_type": "run", "duration": {"duration_type": "time", "duration_s": 600}},
+      {"step_type": "cooldown", "duration": {"duration_type": "time", "duration_s": 300}}
+    ]
+  },
+  "confirmed": true
+}
+```
+
+Do not display or save the serialized Garmin payload or raw response. Report
+only the compact normalized tool result. If the call fails or is uncertain, do
+not retry and do not delete or modify anything automatically.
+
+## Manual Garmin Connect acceptance
+
+- [x] Exactly one test workout exists.
+- [x] Its name is `MCP TEST - Easy Run` and its sport is running.
+- [x] Warmup, run, and cooldown appear in that order for 5, 10, and 5 minutes.
+- [x] The workout opens normally.
+- [x] It is not scheduled.
+- [x] No duplicate or unexpected workout was created.
+- [x] No calendar or device state changed.
+
+The user confirmed every item passed. The test workout was not automatically
+deleted. Deletion remains outside Milestone 8 and requires a separate explicit
+request. Milestone 9 has not started.
+
+---
+
+# Historical Milestone 7 Offline Workout-Preview Verification
 
 Milestone 7 was completed and manually verified on 2026-08-27 using only local
 synthetic previews. No Garmin client/account operation occurred, no payload was

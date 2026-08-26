@@ -537,6 +537,263 @@ def test_garmin_scheduled_workouts_returns_normalized_range(
     assert fake_client.calls == [("get_scheduled_workouts", (2026, 5), {})]
 
 
+def synthetic_creation_definition() -> dict[str, object]:
+    return {
+        "name": "Synthetic Creation Fixture",
+        "steps": [
+            {
+                "step_type": "run",
+                "duration": {"duration_type": "time", "duration_s": 600},
+            }
+        ],
+    }
+
+
+def test_running_workout_creation_defaults_to_no_write(
+    fake_client: FakeClient,
+) -> None:
+    assert server.garmin_create_running_workout(synthetic_creation_definition()) == {
+        "created": False,
+        "workout_id": None,
+        "name": "Synthetic Creation Fixture",
+        "sport_type": "running",
+        "total_duration_s": 600.0,
+        "total_distance_m": None,
+        "scheduled": False,
+        "message": (
+            "Not created; preview the validated workout, then call again with "
+            "confirmed=true to create exactly one unscheduled workout."
+        ),
+    }
+    assert fake_client.calls == []
+
+
+@pytest.mark.parametrize("arguments", [{}, {"confirmed": False}])
+def test_unconfirmed_running_workout_creation_does_not_construct_client_through_mcp(
+    monkeypatch: pytest.MonkeyPatch, arguments: dict[str, object]
+) -> None:
+    client_constructions = 0
+
+    def forbidden_client() -> object:
+        nonlocal client_constructions
+        client_constructions += 1
+        raise AssertionError("Garmin client must not be constructed")
+
+    monkeypatch.setattr(server, "_client", forbidden_client)
+
+    async def call_unconfirmed() -> object:
+        return await server.mcp.call_tool(
+            "garmin_create_running_workout",
+            {"definition": synthetic_creation_definition(), **arguments},
+        )
+
+    _, result = anyio.run(call_unconfirmed)
+
+    assert result["created"] is False
+    assert client_constructions == 0
+
+
+def test_confirmed_running_workout_creation_uploads_once(
+    fake_client: FakeClient,
+) -> None:
+    assert server.garmin_create_running_workout(
+        synthetic_creation_definition(), confirmed=True
+    ) == {
+        "created": True,
+        "workout_id": "456",
+        "name": "Synthetic Creation Fixture",
+        "sport_type": "running",
+        "total_duration_s": 600.0,
+        "total_distance_m": None,
+        "scheduled": False,
+        "message": "Workout created in Garmin Connect but not scheduled.",
+    }
+    assert [call[0] for call in fake_client.calls] == ["upload_workout"]
+
+
+def test_confirmed_running_workout_creation_uses_fake_client_through_mcp(
+    fake_client: FakeClient,
+) -> None:
+    async def call_confirmed() -> object:
+        return await server.mcp.call_tool(
+            "garmin_create_running_workout",
+            {
+                "definition": synthetic_creation_definition(),
+                "confirmed": True,
+            },
+        )
+
+    _, result = anyio.run(call_confirmed)
+
+    assert result == {
+        "created": True,
+        "workout_id": "456",
+        "name": "Synthetic Creation Fixture",
+        "sport_type": "running",
+        "total_duration_s": 600.0,
+        "total_distance_m": None,
+        "scheduled": False,
+        "message": "Workout created in Garmin Connect but not scheduled.",
+    }
+    assert [call[0] for call in fake_client.calls] == ["upload_workout"]
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        {"name": "Synthetic Invalid", "steps": []},
+        {"name": "Synthetic Invalid", "steps": [], "unknown": True},
+        {
+            "name": "Synthetic Invalid",
+            "sport_type": "cycling",
+            "steps": [
+                {
+                    "step_type": "run",
+                    "duration": {"duration_type": "time", "duration_s": 60},
+                }
+            ],
+        },
+        {
+            "name": "Synthetic Invalid",
+            "steps": [
+                {
+                    "step_type": "unknown",
+                    "duration": {"duration_type": "time", "duration_s": 60},
+                }
+            ],
+        },
+        {
+            "name": "Synthetic Invalid",
+            "steps": [
+                {
+                    "step_type": "run",
+                    "duration": {"duration_type": "time", "duration_s": "60"},
+                }
+            ],
+        },
+        {
+            "name": "Synthetic Invalid",
+            "steps": [
+                {
+                    "step_type": "run",
+                    "duration": {"duration_type": "open", "distance_m": 100},
+                }
+            ],
+        },
+        {
+            "name": "Synthetic Invalid",
+            "steps": [
+                {
+                    "step_type": "run",
+                    "duration": {"duration_type": "time", "duration_s": 60},
+                    "target": {
+                        "target_type": "heart_rate_range",
+                        "minimum_heart_rate_bpm": 160,
+                        "maximum_heart_rate_bpm": 150,
+                    },
+                }
+            ],
+        },
+        {
+            "name": "Synthetic Invalid",
+            "steps": [{"step_type": "repeat", "repeat_count": 2, "steps": []}],
+        },
+        {
+            "name": "Synthetic Invalid",
+            "steps": [
+                {
+                    "step_type": "repeat",
+                    "repeat_count": 50,
+                    "steps": [
+                        {
+                            "step_type": "run",
+                            "duration": {
+                                "duration_type": "time",
+                                "duration_s": 60,
+                            },
+                        },
+                        {
+                            "step_type": "recovery",
+                            "duration": {
+                                "duration_type": "time",
+                                "duration_s": 60,
+                            },
+                        },
+                    ],
+                },
+                {
+                    "step_type": "cooldown",
+                    "duration": {"duration_type": "time", "duration_s": 60},
+                },
+            ],
+        },
+    ],
+)
+def test_all_builder_validation_categories_fail_before_client_construction(
+    monkeypatch: pytest.MonkeyPatch, definition: dict[str, object]
+) -> None:
+    client_constructions = 0
+
+    def forbidden_client() -> object:
+        nonlocal client_constructions
+        client_constructions += 1
+        raise AssertionError("Garmin client must not be constructed")
+
+    monkeypatch.setattr(server, "_client", forbidden_client)
+
+    async def call_invalid() -> None:
+        await server.mcp.call_tool(
+            "garmin_create_running_workout",
+            {"definition": definition, "confirmed": True},
+        )
+
+    with pytest.raises(ToolError):
+        anyio.run(call_invalid)
+
+    assert client_constructions == 0
+
+
+@pytest.mark.parametrize("confirmed", ["true", 1, 0, None])
+def test_running_workout_creation_requires_strict_boolean_confirmation_through_mcp(
+    fake_client: FakeClient, confirmed: object
+) -> None:
+    async def call_with_invalid_confirmation() -> None:
+        await server.mcp.call_tool(
+            "garmin_create_running_workout",
+            {"definition": synthetic_creation_definition(), "confirmed": confirmed},
+        )
+
+    with pytest.raises(ToolError):
+        anyio.run(call_with_invalid_confirmation)
+
+    assert fake_client.calls == []
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        {"workoutName": "Unsafe payload", "workoutSegments": []},
+        [synthetic_creation_definition(), synthetic_creation_definition()],
+    ],
+)
+def test_running_workout_creation_rejects_arbitrary_or_bulk_payloads_before_client(
+    fake_client: FakeClient, definition: object
+) -> None:
+    async def call_with_unsafe_definition() -> None:
+        await server.mcp.call_tool(
+            "garmin_create_running_workout",
+            {
+                "definition": definition,
+                "confirmed": True,
+            },
+        )
+
+    with pytest.raises(ToolError):
+        anyio.run(call_with_unsafe_definition)
+
+    assert fake_client.calls == []
+
+
 def test_garmin_schedule_workout_returns_summary(fake_client: FakeClient) -> None:
     assert server.garmin_schedule_workout("456", "2026-05-24") == {
         "scheduled_workout_id": 789,

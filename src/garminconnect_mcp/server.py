@@ -17,6 +17,7 @@ from .provider import (
     GarminRecoveryProvider,
     GarminWorkoutProvider,
     InvalidActivityRequestError,
+    InvalidWorkoutRequestError,
 )
 from .training import (
     compare_recent_weekly_longest_runs,
@@ -25,6 +26,7 @@ from .training import (
 )
 from .workout_builder import (
     WorkoutDefinition,
+    aggregate_workout,
     preview_running_workout,
 )
 
@@ -472,6 +474,40 @@ def garmin_preview_running_workout(
     if not isinstance(definition, WorkoutDefinition):
         definition = WorkoutDefinition.model_validate(definition, strict=True)
     return preview_running_workout(definition)
+
+
+@mcp.tool()
+def garmin_create_running_workout(
+    definition: WorkoutDefinition, confirmed: StrictBool = False
+) -> dict[str, Any]:
+    """Create exactly one validated running workout, without scheduling it.
+
+    The definition uses the same strict schema and explicit units as
+    garmin_preview_running_workout. The default confirmed=false performs no
+    Garmin client or network call. Set confirmed=true only after reviewing the
+    exact preview. A confirmed call uploads once, does not retry, and cannot
+    schedule, modify, unschedule, delete, or push a workout to a device.
+    """
+    if not isinstance(definition, WorkoutDefinition):
+        definition = WorkoutDefinition.model_validate(definition, strict=True)
+    if not isinstance(confirmed, bool):
+        raise InvalidWorkoutRequestError("confirmed must be a boolean")
+    if not confirmed:
+        aggregates = aggregate_workout(definition)
+        return {
+            "created": False,
+            "workout_id": None,
+            "name": definition.name,
+            "sport_type": definition.sport_type,
+            "total_duration_s": aggregates["total_duration_s"],
+            "total_distance_m": aggregates["total_distance_m"],
+            "scheduled": False,
+            "message": (
+                "Not created; preview the validated workout, then call again with "
+                "confirmed=true to create exactly one unscheduled workout."
+            ),
+        }
+    return _workout_provider().create_running_workout(definition)
 
 
 @mcp.tool()

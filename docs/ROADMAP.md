@@ -375,6 +375,29 @@ Create one test workout in the user's Garmin account.
 
 Do not perform real Garmin writes without explicit user approval.
 
+## Tasks
+
+* [x] Add `garmin_create_running_workout(definition, confirmed=false)` using the
+      exact Milestone 7 strict model and serializer.
+* [x] Validate the whole definition before client construction.
+* [x] Require a strict explicit Boolean before one real upload.
+* [x] Keep upload and secret-safe error mapping behind the workout provider.
+* [x] Return only compact normalized facts with `scheduled=false`.
+* [x] Add offline synthetic tests for no-write defaults, validation, exact
+      serializer input, one-call/no-retry behavior, malformed responses,
+      privacy filtering, safe errors, and unreachable calendar/device writes.
+* [x] Update Milestone 8 documentation and offline verification instructions.
+* [x] Receive explicit approval for the exact synthetic proposal.
+* [x] Invoke the validated creation tool exactly once without automatic retry.
+* [x] Complete manual Garmin Connect verification.
+* [x] Rerun all required checks, commit the focused change, and push to
+      `origin/main` only after manual verification passes.
+
+Status: completed and manually verified on 2026-08-27. Exactly one explicitly
+approved synthetic running workout was created successfully and remained
+unscheduled. No retry, duplicate, calendar change, device push, modification,
+unscheduling, or deletion occurred. Milestone 9 has not started.
+
 ## Manual Test Workout
 
 Use a clearly identifiable test name such as:
@@ -387,12 +410,13 @@ Use a harmless short workout.
 
 ## Manual Verification
 
-* [ ] Workout appears in Garmin Connect.
-* [ ] Steps match intended structure.
-* [ ] Targets match.
-* [ ] Units are correct.
-* [ ] Workout can be opened normally.
-* [ ] No duplicate unexpected workouts were created.
+* [x] Workout appears in Garmin Connect.
+* [x] Steps match intended structure.
+* [x] Targets match.
+* [x] Units are correct.
+* [x] Workout can be opened normally.
+* [x] No duplicate unexpected workouts were created.
+* [x] Workout is not scheduled and no calendar or device state changed.
 
 ---
 

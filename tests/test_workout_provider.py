@@ -16,6 +16,11 @@ from garminconnect_mcp.provider import (
     WorkoutAuthenticationError,
     WorkoutEndpointError,
     WorkoutResponseError,
+    WorkoutUnsupportedError,
+)
+from garminconnect_mcp.workout_builder import (
+    WorkoutDefinition,
+    serialize_running_workout,
 )
 
 
@@ -42,6 +47,7 @@ class SyntheticClient:
         saved_response: Any = None,
         my_workouts_response: Any = None,
         monthly_responses: dict[tuple[int, int], Any] | None = None,
+        upload_response: Any = None,
         error: Exception | None = None,
     ) -> None:
         self.saved_response = [] if saved_response is None else saved_response
@@ -51,8 +57,24 @@ class SyntheticClient:
             else my_workouts_response
         )
         self.monthly_responses = monthly_responses or {}
+        self.upload_response = (
+            {
+                "workoutId": 8100000099,
+                "workoutName": "private response name",
+                "sportType": {"sportTypeKey": "running"},
+                "ownerId": 12345,
+                "url": "https://private.invalid/workout",
+            }
+            if upload_response is None
+            else upload_response
+        )
         self.error = error
         self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def upload_workout(self, workout_json: object) -> Any:
+        self.calls.append(("upload_workout", (workout_json,)))
+        self._raise()
+        return self.upload_response
 
     def _raise(self) -> None:
         if self.error is not None:
@@ -76,6 +98,110 @@ class SyntheticClient:
 
 def provider(client: SyntheticClient) -> GarminWorkoutProvider:
     return GarminWorkoutProvider(lambda: client)
+
+
+def creation_definition() -> WorkoutDefinition:
+    return WorkoutDefinition.model_validate(
+        {
+            "name": "Synthetic Creation Fixture",
+            "steps": [
+                {
+                    "step_type": "run",
+                    "duration": {"duration_type": "time", "duration_s": 600},
+                }
+            ],
+        },
+        strict=True,
+    )
+
+
+def test_create_running_workout_uploads_exact_serializer_output_once() -> None:
+    client = SyntheticClient()
+    definition = creation_definition()
+
+    result = provider(client).create_running_workout(definition)
+
+    assert result == {
+        "created": True,
+        "workout_id": "8100000099",
+        "name": "Synthetic Creation Fixture",
+        "sport_type": "running",
+        "total_duration_s": 600.0,
+        "total_distance_m": None,
+        "scheduled": False,
+        "message": "Workout created in Garmin Connect but not scheduled.",
+    }
+    assert client.calls == [
+        ("upload_workout", (serialize_running_workout(definition),))
+    ]
+    rendered = repr(result).casefold()
+    assert "private response name" not in rendered
+    assert "owner" not in rendered
+    assert "url" not in rendered
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        [],
+        {"workoutName": "Synthetic response without ID"},
+        {"workoutId": True, "workoutName": "Synthetic invalid ID"},
+    ],
+)
+def test_create_running_workout_rejects_malformed_responses_without_retry(
+    response: object,
+) -> None:
+    client = SyntheticClient(upload_response=response)
+
+    with pytest.raises(WorkoutResponseError, match="response|workout ID"):
+        provider(client).create_running_workout(creation_definition())
+
+    assert [call[0] for call in client.calls] == ["upload_workout"]
+
+
+@pytest.mark.parametrize(
+    ("upstream_error", "expected_error", "message"),
+    [
+        (
+            GarminConnectAuthenticationError("private creation auth text"),
+            WorkoutAuthenticationError,
+            "authentication failed",
+        ),
+        (
+            GarminConnectTooManyRequestsError("private creation rate text"),
+            WorkoutEndpointError,
+            "rate limit",
+        ),
+        (
+            GarminConnectConnectionError("private creation endpoint text"),
+            WorkoutEndpointError,
+            "endpoint failed",
+        ),
+    ],
+)
+def test_create_running_workout_maps_failures_without_retry_or_private_text(
+    upstream_error: Exception,
+    expected_error: type[Exception],
+    message: str,
+) -> None:
+    client = SyntheticClient(error=upstream_error)
+
+    with pytest.raises(expected_error, match=message) as raised:
+        provider(client).create_running_workout(creation_definition())
+
+    assert "private creation" not in str(raised.value)
+    assert [call[0] for call in client.calls] == ["upload_workout"]
+
+
+def test_create_running_workout_maps_missing_upload_support_safely() -> None:
+    class UnsupportedClient:
+        pass
+
+    with pytest.raises(WorkoutUnsupportedError, match="does not support"):
+        GarminWorkoutProvider(lambda: UnsupportedClient()).create_running_workout(
+            creation_definition()
+        )
 
 
 def test_saved_workouts_has_bounded_pagination_and_ui_order() -> None:
