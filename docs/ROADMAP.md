@@ -50,14 +50,18 @@ Establish reliable access to the user's Garmin account.
 
 ## Tasks
 
-* [ ] Set up the local environment.
-* [ ] Install dependencies.
+* [x] Set up the local environment.
+* [x] Install dependencies with the MCP 1.x compatibility bound.
 * [ ] Perform Garmin authentication using the repository's supported flow.
-* [ ] Support MFA if required.
-* [ ] Verify tokens/session are stored outside version control.
+* [x] Support MFA if required.
+* [x] Verify the default token/session directory is outside version control.
 * [ ] Run connection smoke test.
 * [ ] Verify authentication survives MCP process restart.
-* [ ] Add troubleshooting notes.
+* [x] Add troubleshooting notes.
+
+Status: automated setup and offline verification completed on 2026-08-26.
+Live authentication, the connection smoke test, and restart persistence are
+waiting for the user's manual verification; Milestone 2 must not begin first.
 
 ## Manual Test
 

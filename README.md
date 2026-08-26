@@ -9,20 +9,41 @@ The Garmin work is done by the [`python-garminconnect`](https://github.com/cyber
 ```bash
 cd /path/to/garminconnect-mcp
 python3 -m venv .venv
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -e '.[dev]'
 cp .env.example .env
 ```
 
-Edit `.env` with `GARMIN_EMAIL` and `GARMIN_PASSWORD`.
+For the first login, the safest supported flow is to enter credentials into
+temporary shell variables. The password prompt is hidden, and neither value is
+written to shell history or a tracked file:
 
-Run once from a terminal to create or refresh saved Garmin tokens:
+```zsh
+read -r "GARMIN_EMAIL?Garmin email: "
+read -rs "GARMIN_PASSWORD?Garmin password: "; echo
+export GARMIN_EMAIL GARMIN_PASSWORD
+.venv/bin/garminconnect-mcp login
+unset GARMIN_EMAIL GARMIN_PASSWORD GARMIN_MFA_CODE
+```
+
+If Garmin asks for MFA, the login command prompts for the code in the terminal.
+Do not send or save the MFA code. The successful login stores reusable tokens in
+`~/.garminconnect` by default, outside this repository.
+
+Start a second process to verify that saved-token authentication survives a
+restart without credentials:
 
 ```bash
 .venv/bin/garminconnect-mcp login
 ```
 
-If Garmin asks for MFA, the login command prompts for the code in the terminal.
-For non-interactive use, set `GARMIN_MFA_CODE` temporarily.
+Both commands are connection-only checks. They do not request private health
+payloads and do not create, modify, schedule, or delete Garmin workouts. See
+[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) for the complete Milestone 1
+verification and troubleshooting checklist.
+
+As an alternative, `.env` is ignored by Git and may contain `GARMIN_EMAIL` and
+`GARMIN_PASSWORD`, but temporary shell variables reduce the number of credential
+copies. Never put credentials or MFA codes in `.env.example`.
 
 The MCP server runs over stdio. Configure Codex with this command:
 
@@ -93,6 +114,7 @@ and schedule a new workout, pass Garmin Connect workout JSON to
 
 ```bash
 scripts/check-private-output.sh
+.venv/bin/python -m pip check
 .venv/bin/python -m pytest
 .venv/bin/python -m ruff check .
 .venv/bin/python -m ruff format --check .

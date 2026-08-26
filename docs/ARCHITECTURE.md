@@ -76,17 +76,16 @@ The declared runtime dependencies are:
 | Dependency | Declared range | Purpose |
 | --- | --- | --- |
 | `garminconnect` | `>=0.3.3,<0.4` | Unofficial Garmin Connect authentication and API client |
-| `mcp` | `>=1.2.0` | FastMCP server and stdio transport |
+| `mcp` | `>=1.2.0,<2` | FastMCP server and stdio transport |
 | `python-dotenv` | `>=1.0.1` | Load local credentials and settings from `.env` |
 
-The audit environment resolved `garminconnect 0.3.11` and
+The Milestone 1 environment resolved `garminconnect 0.3.11`, `mcp 1.29.1`, and
 `python-dotenv 1.2.3`.
 
-There is a dependency compatibility defect: a fresh install resolved `mcp 2.1.0`,
-which no longer provides `mcp.server.fastmcp`. Test collection then failed with
-`ModuleNotFoundError`. Installing the latest 1.x release (`mcp 1.29.1`) made the
-entire existing suite pass. The project needs either an upper bound on MCP or a
-deliberate migration to MCP 2.x in a later change.
+Milestone 0 found a dependency compatibility defect: a fresh install resolved
+`mcp 2.1.0`, which no longer provides `mcp.server.fastmcp`. Milestone 1 fixes the
+reproducibility issue with the minimal compatible upper bound, `mcp<2`. A
+deliberate MCP 2.x migration remains a possible later change.
 
 ## Existing MCP tools
 
@@ -176,5 +175,5 @@ it should be extended rather than rewritten. The roadmap order remains suitable:
 4. Extract a provider seam when higher-level logic requires it.
 5. Add validated workout models before relying on existing write pass-throughs.
 
-The MCP dependency incompatibility should be resolved before treating a fresh
-installation as reproducible, but that fix is intentionally outside Milestone 0.
+The MCP dependency incompatibility was resolved in Milestone 1 with an upper
+bound rather than a framework migration.
