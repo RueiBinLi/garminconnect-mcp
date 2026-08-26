@@ -34,13 +34,27 @@ from .recovery import (
     normalize_stress,
     validate_date,
 )
+from .workouts import (
+    MalformedWorkoutResponseError,
+    NormalizedScheduledWorkout,
+    NormalizedWorkout,
+    normalize_scheduled_workout,
+    normalize_workout,
+    scheduled_workout_items,
+    workout_is_running,
+    workout_items,
+)
 
 MAX_ACTIVITY_PAGE_SIZE = 100
 MAX_RUNNING_DATE_RANGE_DAYS = 42
 MAX_HRV_RANGE_DAYS = 14
+MAX_WORKOUT_PAGE_SIZE = 100
+MAX_SCHEDULED_WORKOUT_RANGE_DAYS = 31
 
 
 class GarminClient(Protocol):
+    def connectapi(self, path: str, **kwargs: Any) -> Any: ...
+
     def get_activities(
         self, start: int = 0, limit: int = 20, activitytype: str | None = None
     ) -> Any: ...
@@ -68,6 +82,8 @@ class GarminClient(Protocol):
     def get_body_battery(self, startdate: str, enddate: str | None = None) -> Any: ...
 
     def get_stress_data(self, cdate: str) -> Any: ...
+
+    def get_scheduled_workouts(self, year: int, month: int) -> Any: ...
 
 
 class ActivityProviderError(RuntimeError):
@@ -305,3 +321,151 @@ class GarminRecoveryProvider:
             raise RecoveryEndpointError(f"Garmin {operation} endpoint failed") from exc
         except Exception as exc:
             raise RecoveryEndpointError(f"Garmin {operation} endpoint failed") from exc
+
+
+class WorkoutProviderError(RuntimeError):
+    """Base class for stable, secret-safe workout provider failures."""
+
+
+class WorkoutAuthenticationError(WorkoutProviderError):
+    pass
+
+
+class WorkoutEndpointError(WorkoutProviderError):
+    pass
+
+
+class WorkoutResponseError(WorkoutProviderError):
+    pass
+
+
+class InvalidWorkoutRequestError(WorkoutProviderError, ValueError):
+    pass
+
+
+class GarminWorkoutProvider:
+    """Isolate unofficial Garmin workout and calendar calls from MCP code."""
+
+    def __init__(self, client_factory: Callable[[], GarminClient]) -> None:
+        self._client_factory = client_factory
+
+    def saved_workouts(
+        self, *, start: int, limit: int, running_only: bool
+    ) -> tuple[int, list[NormalizedWorkout]]:
+        if isinstance(start, bool) or not isinstance(start, int) or start < 0:
+            raise InvalidWorkoutRequestError("start must be a non-negative integer")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= MAX_WORKOUT_PAGE_SIZE
+        ):
+            raise InvalidWorkoutRequestError(
+                f"limit must be between 1 and {MAX_WORKOUT_PAGE_SIZE}"
+            )
+        if not isinstance(running_only, bool):
+            raise InvalidWorkoutRequestError("running_only must be a boolean")
+
+        raw = self._call(
+            "saved workouts",
+            lambda client: client.connectapi(
+                "/workout-service/workouts",
+                params={
+                    "start": start + 1,
+                    "limit": limit,
+                    "myWorkoutsOnly": "true",
+                    "sharedWorkoutsOnly": "false",
+                    "includeAtp": "false",
+                    "orderBy": "UPDATE_DATE",
+                    "orderSeq": "DESC",
+                    **({"sportTypeKey": "running"} if running_only else {}),
+                },
+            ),
+        )
+        try:
+            source_items = workout_items(raw)
+            normalized = [normalize_workout(item) for item in source_items]
+        except MalformedWorkoutResponseError as exc:
+            raise WorkoutResponseError(str(exc)) from exc
+        if running_only:
+            normalized = [item for item in normalized if workout_is_running(item)]
+        return len(source_items), normalized
+
+    def scheduled_workouts(
+        self, start_date: str, end_date: str
+    ) -> list[NormalizedScheduledWorkout]:
+        start_date = self._date(start_date, name="start_date")
+        end_date = self._date(end_date, name="end_date")
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+        if start > end:
+            raise InvalidWorkoutRequestError("start_date must be on or before end_date")
+        day_count = (end - start).days + 1
+        if day_count > MAX_SCHEDULED_WORKOUT_RANGE_DAYS:
+            raise InvalidWorkoutRequestError(
+                "scheduled-workout ranges must contain at most "
+                f"{MAX_SCHEDULED_WORKOUT_RANGE_DAYS} days"
+            )
+
+        result: list[NormalizedScheduledWorkout] = []
+        year, month = start.year, start.month
+        while (year, month) <= (end.year, end.month):
+            raw = self._call(
+                "scheduled workouts",
+                lambda client, year=year, month=month: client.get_scheduled_workouts(
+                    year, month
+                ),
+            )
+            try:
+                normalized = [
+                    normalize_scheduled_workout(item)
+                    for item in scheduled_workout_items(raw)
+                ]
+            except MalformedWorkoutResponseError as exc:
+                raise WorkoutResponseError(str(exc)) from exc
+            for item in normalized:
+                scheduled_date = item["scheduled_date"]
+                if (
+                    scheduled_date is not None
+                    and start_date <= scheduled_date <= end_date
+                ):
+                    result.append(item)
+            if month == 12:
+                year, month = year + 1, 1
+            else:
+                month += 1
+
+        result.sort(key=self._scheduled_sort_key)
+        return result
+
+    @staticmethod
+    def _date(value: Any, *, name: str) -> str:
+        try:
+            return validate_date(value, name=name)
+        except ValueError as exc:
+            raise InvalidWorkoutRequestError(str(exc)) from exc
+
+    @staticmethod
+    def _scheduled_sort_key(
+        item: NormalizedScheduledWorkout,
+    ) -> tuple[str, str, str]:
+        return (
+            item["scheduled_date"] or "",
+            item["scheduled_workout_id"] or "",
+            item["workout_id"] or "",
+        )
+
+    def _call(self, operation: str, callback: Callable[[GarminClient], Any]) -> Any:
+        try:
+            return callback(self._client_factory())
+        except GarminConnectAuthenticationError as exc:
+            raise WorkoutAuthenticationError(
+                "Garmin authentication failed; refresh the saved login"
+            ) from exc
+        except GarminConnectTooManyRequestsError as exc:
+            raise WorkoutEndpointError(
+                f"Garmin {operation} endpoint rate limit was reached"
+            ) from exc
+        except (GarminConnectConnectionError, GarminConnectNotFoundError) as exc:
+            raise WorkoutEndpointError(f"Garmin {operation} endpoint failed") from exc
+        except Exception as exc:
+            raise WorkoutEndpointError(f"Garmin {operation} endpoint failed") from exc

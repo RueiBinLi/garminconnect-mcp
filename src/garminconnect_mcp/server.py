@@ -10,10 +10,12 @@ from typing import Any
 from dotenv import load_dotenv
 from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
+from pydantic import StrictBool, StrictInt
 
 from .provider import (
     GarminActivityProvider,
     GarminRecoveryProvider,
+    GarminWorkoutProvider,
     InvalidActivityRequestError,
 )
 from .training import (
@@ -97,6 +99,10 @@ def _recovery_provider() -> GarminRecoveryProvider:
     return GarminRecoveryProvider(_client)
 
 
+def _workout_provider() -> GarminWorkoutProvider:
+    return GarminWorkoutProvider(_client)
+
+
 def _first_present(data: dict[str, Any], keys: tuple[str, ...]) -> Any:
     for key in keys:
         value = data.get(key)
@@ -164,37 +170,6 @@ def _summarize_scheduled_workout(workout: dict[str, Any]) -> dict[str, Any]:
         ),
         **_summarize_workout(template),
     }
-
-
-def _summarize_items(
-    data: Any, preferred_keys: tuple[str, ...], kind: str
-) -> dict[str, Any]:
-    items: list[Any] | None = None
-    if isinstance(data, list):
-        items = data
-    elif isinstance(data, dict):
-        for key in preferred_keys:
-            value = data.get(key)
-            if isinstance(value, list):
-                items = value
-                break
-        if items is None:
-            first_list = next(
-                (value for value in data.values() if isinstance(value, list)), None
-            )
-            if isinstance(first_list, list):
-                items = first_list
-
-    if items is None:
-        items = []
-
-    summarizer = (
-        _summarize_scheduled_workout
-        if kind == "scheduled_workout"
-        else _summarize_workout
-    )
-    summaries = [summarizer(item) for item in items if isinstance(item, dict)]
-    return {"count": len(summaries), "items": summaries}
 
 
 @mcp.tool()
@@ -434,21 +409,48 @@ def garmin_compare_recent_long_runs(end_date: str, limit: int = 3) -> dict[str, 
 
 
 @mcp.tool()
-def garmin_workouts(start: int = 0, limit: int = 20) -> dict[str, Any]:
-    """List saved Garmin workout templates with summarized fields."""
-    return _summarize_items(
-        _call("get_workouts", start, limit), ("workouts",), "workout"
+def garmin_workouts(
+    start: StrictInt = 0, limit: StrictInt = 20, running_only: StrictBool = False
+) -> dict[str, Any]:
+    """List one read-only page of compact saved Garmin workout templates.
+
+    start is a zero-based public offset; limit is 1-100. The provider translates
+    this to Garmin's current My Workouts pagination and running_only sport filter,
+    then defensively checks normalized sport types. Results use Garmin's updated-
+    date-descending UI order. Duration uses seconds and distance uses meters;
+    unavailable fields are null. Raw steps are discarded.
+    """
+    source_count, items = _workout_provider().saved_workouts(
+        start=start, limit=limit, running_only=running_only
     )
+    return {
+        "start": start,
+        "limit": limit,
+        "running_only": running_only,
+        "source_count": source_count,
+        "count": len(items),
+        "items": items,
+    }
 
 
 @mcp.tool()
-def garmin_scheduled_workouts(year: int, month: int) -> dict[str, Any]:
-    """List scheduled Garmin workouts for a calendar month using 1-12 months."""
-    return _summarize_items(
-        _call("get_scheduled_workouts", year, month),
-        ("scheduledWorkouts", "workouts", "calendarItems"),
-        "scheduled_workout",
-    )
+def garmin_scheduled_workouts(start_date: str, end_date: str) -> dict[str, Any]:
+    """List read-only scheduled workouts in an inclusive range up to 31 days.
+
+    Dates must be strict YYYY-MM-DD Garmin calendar dates. The provider fetches
+    the intersecting Garmin calendar month(s), discards non-workout items, and
+    orders results by scheduled date and IDs. Dates are date-only: no timezone
+    or instant is inferred. Duration uses seconds, distance uses meters,
+    unavailable fields are null, and raw calendar/step payloads are discarded.
+    """
+    items = _workout_provider().scheduled_workouts(start_date, end_date)
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "inclusive": True,
+        "count": len(items),
+        "items": items,
+    }
 
 
 @mcp.tool()

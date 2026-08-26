@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import anyio
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 from garminconnect_mcp import server
 from garminconnect_mcp.provider import (
@@ -140,9 +142,18 @@ class FakeClient:
                 "workoutId": 456,
                 "workoutName": "Easy Run",
                 "sportType": {"sportTypeKey": "running"},
+                "description": None,
                 "estimatedDurationInSecs": 1800,
+                "estimatedDistanceInMeters": None,
             }
         ]
+
+    def connectapi(self, path: str, **kwargs: object) -> object:
+        if path == "/workout-service/workouts":
+            result = self.get_workouts()
+            self.calls[-1] = ("connectapi", (path,), kwargs)
+            return result
+        raise AssertionError(f"unexpected synthetic path: {path}")
 
     def get_scheduled_workouts(self, year: int, month: int) -> dict[str, object]:
         self.calls.append(("get_scheduled_workouts", (year, month), {}))
@@ -443,32 +454,83 @@ def test_recent_long_run_comparison_rejects_date_underflow_before_garmin(
     assert fake_client.calls == []
 
 
-def test_garmin_workouts_returns_summary(fake_client: FakeClient) -> None:
-    assert server.garmin_workouts(start=2, limit=1) == {
+def test_garmin_workouts_returns_normalized_page(fake_client: FakeClient) -> None:
+    assert server.garmin_workouts(start=2, limit=1, running_only=True) == {
+        "start": 2,
+        "limit": 1,
+        "running_only": True,
+        "source_count": 1,
         "count": 1,
         "items": [
             {
-                "workout_id": 456,
+                "workout_id": "456",
                 "name": "Easy Run",
                 "sport_type": "running",
-                "estimated_duration_secs": 1800,
+                "description": None,
+                "estimated_duration_s": 1800.0,
+                "estimated_distance_m": None,
             }
         ],
     }
-    assert fake_client.calls == [("get_workouts", (2, 1), {})]
+    assert fake_client.calls == [
+        (
+            "connectapi",
+            ("/workout-service/workouts",),
+            {
+                "params": {
+                    "start": 3,
+                    "limit": 1,
+                    "myWorkoutsOnly": "true",
+                    "sharedWorkoutsOnly": "false",
+                    "includeAtp": "false",
+                    "orderBy": "UPDATE_DATE",
+                    "orderSeq": "DESC",
+                    "sportTypeKey": "running",
+                }
+            },
+        )
+    ]
 
 
-def test_garmin_scheduled_workouts_returns_summary(fake_client: FakeClient) -> None:
-    assert server.garmin_scheduled_workouts(2026, 5) == {
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"start": 0, "limit": 1, "running_only": "true"},
+        {"start": "0", "limit": 1, "running_only": False},
+        {"start": 0, "limit": "1", "running_only": False},
+    ],
+)
+def test_garmin_workouts_rejects_coerced_types_through_mcp(
+    fake_client: FakeClient,
+    arguments: dict[str, object],
+) -> None:
+    async def call_with_invalid_type() -> None:
+        await server.mcp.call_tool("garmin_workouts", arguments)
+
+    with pytest.raises(ToolError):
+        anyio.run(call_with_invalid_type)
+
+    assert fake_client.calls == []
+
+
+def test_garmin_scheduled_workouts_returns_normalized_range(
+    fake_client: FakeClient,
+) -> None:
+    assert server.garmin_scheduled_workouts("2026-05-24", "2026-05-24") == {
+        "start_date": "2026-05-24",
+        "end_date": "2026-05-24",
+        "inclusive": True,
         "count": 1,
         "items": [
             {
-                "scheduled_workout_id": 789,
-                "date": "2026-05-24",
-                "workout_id": 456,
+                "scheduled_workout_id": "789",
+                "scheduled_date": "2026-05-24",
+                "workout_id": "456",
                 "name": "Easy Run",
                 "sport_type": "running",
-                "estimated_duration_secs": None,
+                "description": None,
+                "estimated_duration_s": None,
+                "estimated_distance_m": None,
             }
         ],
     }

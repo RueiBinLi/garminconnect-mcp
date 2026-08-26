@@ -275,11 +275,24 @@ Inspect Garmin workout templates and calendar state.
 
 ## Tasks
 
-* [ ] List workout templates.
-* [ ] List scheduled workouts.
-* [ ] Normalize workout metadata.
-* [ ] Verify dates and timezone handling.
-* [ ] Test missing/empty schedules.
+* [x] Implement bounded saved-workout template pages.
+* [x] Implement inclusive scheduled-workout ranges up to 31 days over Garmin's
+      month endpoint.
+* [x] Normalize compact workout metadata with explicit units and nulls.
+* [x] Add Garmin endpoint running-only filtering with a defensive normalized
+      check and explicit source/result counts.
+* [x] Add strict validation, deterministic ordering, known-envelope parsing,
+      empty results, and secret-safe failure mapping.
+* [x] Add synthetic normalizer, provider, and MCP wrapper tests.
+* [x] Update README, architecture, manual testing, and roadmap documentation.
+* [x] Verify dates and timezone handling.
+* [x] Manually verify missing/empty saved pages and schedules where observable.
+
+Status: complete and manually verified on 2026-08-27. Bounded saved pages,
+running-only filtering, scheduled ranges, compact/null fields, empty results,
+strict MCP validation, date-only calendar semantics, and current Garmin “My
+Workouts” pagination and ordering all passed private comparison. No Garmin
+write or delete operation was used, and no private values were recorded.
 
 ## Manual Tests
 
@@ -294,6 +307,11 @@ What workouts are scheduled this week?
 ```
 
 Compare with Garmin Connect.
+
+Also verify one bounded saved page, endpoint running filtering, one bounded
+calendar range, normalized fields and explicit nulls, observable empty results,
+and rejection of invalid pagination and ranges. Keep all returned private values
+out of durable output.
 
 ---
 

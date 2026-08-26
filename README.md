@@ -130,10 +130,13 @@ Normalized read-only activity tools:
 - `garmin_compare_running_weeks(current_week_start, previous_week_start)`
 - `garmin_compare_recent_long_runs(end_date, limit=3)`
 
-Summarized workout tools:
+Normalized read-only workout tools:
 
-- `garmin_workouts`
-- `garmin_scheduled_workouts`
+- `garmin_workouts(start=0, limit=20, running_only=false)`
+- `garmin_scheduled_workouts(start_date, end_date)`
+
+Legacy workout write tools (not part of Milestone 6):
+
 - `garmin_schedule_workout`
 - `garmin_create_scheduled_workout`
 - `garmin_unschedule_workout`
@@ -202,12 +205,36 @@ rate limits, and endpoint failures produce bounded, secret-safe errors. These
 tools are read-only and cannot affect a Garmin watch.
 
 The profile tool still returns a raw private Garmin payload. Avoid using it for
-recovery verification or pasting its response into durable text.
+verification or pasting its response into durable text.
 
-Workout tools return summarized fields instead of raw Garmin payloads. To create
-and schedule a new workout, pass Garmin Connect workout JSON to
-`garmin_create_scheduled_workout`; to schedule an existing template, use
-`garmin_schedule_workout` with its workout ID.
+The two workout read tools route through a dedicated provider and pure
+normalizers. Saved templates accept a zero-based public offset and a page size
+from 1 through 100. The provider translates this to Garmin's current one-based
+“My Workouts” query with `myWorkoutsOnly=true`, excluding service entries the UI
+does not render. `running_only=true` uses Garmin's `sportTypeKey=running` query
+and is checked again after normalization. `source_count` reports the fetched
+filtered page size and `count` reports items remaining after the defensive
+check. Pagination values require JSON integers and `running_only` requires a
+JSON Boolean; coercible strings and numbers are rejected at the MCP boundary.
+Results follow Garmin's updated-date-descending UI order.
+
+Scheduled ranges are strict, inclusive `YYYY-MM-DD` ranges of at most 31 days.
+Garmin exposes calendar months, so the provider fetches only intersecting
+months, immediately discards non-workout calendar items, filters to the requested
+range, and orders by scheduled date and identifiers. `scheduled_date` is a
+Garmin calendar date, not a timestamp; the server does not infer a timezone or
+instant.
+
+Both read tools return only workout/schedule IDs, name, sport type, description,
+estimated duration in seconds, estimated distance in meters, and scheduled date
+where applicable. Every absent declared field is `null`. Owner/account metadata,
+internal URLs, arbitrary identifiers, and detailed steps are discarded. Empty
+pages and ranges return zero counts and empty items. Invalid inputs, malformed
+known envelopes, authentication failures, rate limits, and endpoint failures
+produce bounded secret-safe errors.
+
+The legacy write tools are unchanged and remain outside Milestone 6. Do not use
+them during read-only workout verification.
 
 ## Development
 
