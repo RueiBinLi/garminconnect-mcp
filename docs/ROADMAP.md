@@ -428,19 +428,34 @@ Schedule an existing workout on a Garmin calendar date.
 
 ## Tasks
 
-* [ ] Implement date validation.
-* [ ] Schedule workout.
-* [ ] Confirm returned Garmin state.
-* [ ] Implement unscheduling.
-* [ ] Add duplicate protection where possible.
-* [ ] Document timezone behavior.
+* [x] Implement strict single-ID and Garmin calendar-date validation.
+* [x] Add an offline schedule preview and strict confirmation boundary.
+* [x] Implement exactly-one scheduling behind the workout provider.
+* [x] Normalize and validate the returned Garmin assignment state.
+* [x] Implement separately confirmed, assignment-only unscheduling.
+* [x] Add exact workout/date duplicate protection.
+* [x] Block the installed dependency's HTTP-401 write replay path.
+* [x] Add offline synthetic MCP/provider safety tests.
+* [x] Document date-only/timezone and device-synchronization behavior.
+* [x] Receive explicit approval and invoke one exact live schedule operation.
+* [x] Complete manual scheduling verification.
+* [x] Receive separate approval and invoke one exact live unschedule operation.
+* [x] Complete manual unscheduling verification.
+* [x] Rerun checks, mark complete, and commit the focused change.
+* [ ] Push to `origin/main` only after explicit authorization.
+
+Status: completed and manually verified on 2026-08-27. Exactly one existing test
+workout was scheduled after exact approval and removed after a second approval.
+The template remained intact, no duplicate or unrelated calendar change was
+observed, and no explicit device-push call occurred. Private assignment values
+are intentionally omitted. Milestone 10 has not started.
 
 ## Manual Verification
 
-* [ ] Workout appears on intended Garmin Connect date.
-* [ ] Workout syncs to the Garmin device.
-* [ ] Workout can be opened from the watch.
-* [ ] Unscheduling removes calendar assignment without deleting the template.
+* [x] Workout appears on intended Garmin Connect date.
+* [x] Garmin's normal synchronization behavior is unchanged; no server push.
+* [x] Underlying workout remains available and opens normally.
+* [x] Unscheduling removes calendar assignment without deleting the template.
 
 ---
 

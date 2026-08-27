@@ -143,7 +143,13 @@ Validated workout-creation tool:
 
 - `garmin_create_running_workout(definition, confirmed=false)`
 
-Legacy workout write tools (not part of Milestone 7):
+Safe existing-workout calendar tools (Milestone 9 complete):
+
+- `garmin_preview_workout_schedule(workout_id, scheduled_date)`
+- `garmin_schedule_existing_workout(workout_id, scheduled_date, confirmed=false)`
+- `garmin_unschedule_existing_workout(scheduled_workout_id, confirmed=false)`
+
+Legacy workout write tools (behavior preserved; do not use for Milestone 9):
 
 - `garmin_schedule_workout`
 - `garmin_create_scheduled_workout`
@@ -294,6 +300,43 @@ opened normally, retained the intended running step order and durations, and
 remained unscheduled; no duplicate, calendar change, or device push occurred.
 Every future creation still requires a separately reviewed definition and
 explicit confirmation. See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
+
+Milestone 9 adds a separate safe boundary for one existing workout and one
+Garmin calendar date. IDs must be positive ASCII decimal strings, dates must be
+exact `YYYY-MM-DD` calendar labels, confirmation must be a JSON Boolean, and
+unknown top-level fields are rejected. Preview and omitted/false scheduling
+confirmation are fully offline: they validate the complete request without
+constructing a Garmin client or changing Garmin.
+
+A confirmed schedule performs one normalized read-only check for an exact
+workout/date duplicate. An existing assignment returns a compact idempotent
+result without another schedule call. Otherwise, scheduling is invoked once and
+returns only schedule state, the assignment ID, requested workout ID/date, and a
+status message. It never creates, uploads, modifies, deletes, or clones a
+workout, and it never calls Garmin's device-push method. Garmin may independently
+synchronize calendar state to connected devices.
+
+Unscheduling has a separate confirmation. Its default path reads one assignment
+by scheduled-workout ID and shows only its normalized ID, workout ID, and
+calendar date without writing. A confirmed call repeats that read immediately,
+then invokes unscheduling once. It removes only the calendar assignment and
+returns `workout_deleted=false`; no template deletion, retry, rollback, or
+automatic cleanup is performed.
+
+The installed `garminconnect 0.3.11` schedule wrappers do not use its transient
+retry decorator, but the low-level client normally replays once after an HTTP
+401. The provider temporarily blocks authentication refresh during only these
+two writes, after the preceding read has safely refreshed expiring credentials.
+A write-time authentication failure therefore stops before a second HTTP
+attempt. Network/endpoint ambiguity, malformed responses, and missing schedule
+IDs are reported as uncertain and must be inspected manually before any retry.
+
+Milestone 9 was completed and manually verified on 2026-08-27. One existing test
+workout was scheduled only after exact approval, verified in Garmin Connect,
+then removed only after a second exact approval. The template remained intact,
+no duplicate or unrelated calendar change occurred, and no device-push method
+was called. Private assignment values are intentionally absent from this record.
+See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
 
 ## Development
 

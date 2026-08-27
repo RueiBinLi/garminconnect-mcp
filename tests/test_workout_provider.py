@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import inspect
+from importlib.metadata import version
 from typing import Any
 
 import pytest
 from garminconnect import (
+    Garmin,
     GarminConnectAuthenticationError,
     GarminConnectConnectionError,
     GarminConnectNotFoundError,
@@ -15,7 +18,9 @@ from garminconnect_mcp.provider import (
     InvalidWorkoutRequestError,
     WorkoutAuthenticationError,
     WorkoutEndpointError,
+    WorkoutNotFoundError,
     WorkoutResponseError,
+    WorkoutUncertainResultError,
     WorkoutUnsupportedError,
 )
 from garminconnect_mcp.workout_builder import (
@@ -48,7 +53,10 @@ class SyntheticClient:
         my_workouts_response: Any = None,
         monthly_responses: dict[tuple[int, int], Any] | None = None,
         upload_response: Any = None,
+        schedule_response: Any = None,
+        scheduled_lookup_response: Any = None,
         error: Exception | None = None,
+        write_error: Exception | None = None,
     ) -> None:
         self.saved_response = [] if saved_response is None else saved_response
         self.my_workouts_response = (
@@ -68,7 +76,24 @@ class SyntheticClient:
             if upload_response is None
             else upload_response
         )
+        self.schedule_response = (
+            {
+                "workoutScheduleId": 8300000099,
+                "calendarDate": "2030-06-15",
+                "workout": saved(8100000099),
+                "ownerId": 12345,
+                "url": "https://private.invalid/schedule",
+            }
+            if schedule_response is None
+            else schedule_response
+        )
+        self.scheduled_lookup_response = (
+            scheduled(8300000099, 8100000099, "2030-06-15")
+            if scheduled_lookup_response is None
+            else scheduled_lookup_response
+        )
         self.error = error
+        self.write_error = write_error
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
     def upload_workout(self, workout_json: object) -> Any:
@@ -95,9 +120,38 @@ class SyntheticClient:
         self._raise()
         return self.monthly_responses.get((year, month), {"calendarItems": []})
 
+    def get_scheduled_workout_by_id(self, scheduled_workout_id: str) -> Any:
+        self.calls.append(("get_scheduled_workout_by_id", (scheduled_workout_id,)))
+        self._raise()
+        return self.scheduled_lookup_response
+
+    def schedule_workout(self, workout_id: str, date_str: str) -> Any:
+        self.calls.append(("schedule_workout", (workout_id, date_str)))
+        if self.write_error is not None:
+            raise self.write_error
+        return self.schedule_response
+
+    def unschedule_workout(self, scheduled_workout_id: str) -> Any:
+        self.calls.append(("unschedule_workout", (scheduled_workout_id,)))
+        if self.write_error is not None:
+            raise self.write_error
+        return {}
+
 
 def provider(client: SyntheticClient) -> GarminWorkoutProvider:
     return GarminWorkoutProvider(lambda: client)
+
+
+def test_installed_write_wrappers_match_audited_single_call_source() -> None:
+    assert version("garminconnect") == "0.3.11"
+
+    schedule_source = inspect.getsource(Garmin.schedule_workout)
+    unschedule_source = inspect.getsource(Garmin.unschedule_workout)
+
+    assert schedule_source.count("self.client.post(") == 1
+    assert unschedule_source.count("self.client.delete(") == 1
+    assert "connectapi(" not in schedule_source
+    assert "connectapi(" not in unschedule_source
 
 
 def creation_definition() -> WorkoutDefinition:
@@ -402,3 +456,264 @@ def test_provider_maps_malformed_envelope_to_stable_error() -> None:
         provider(SyntheticClient(saved_response={"workouts": {}})).saved_workouts(
             start=0, limit=20, running_only=False
         )
+
+
+@pytest.mark.parametrize(
+    ("workout_id", "scheduled_date"),
+    [
+        (8100000099, "2030-06-15"),
+        ("0", "2030-06-15"),
+        ("08100000099", "2030-06-15"),
+        ("8100000099 ", "2030-06-15"),
+        ("https://private.invalid/id", "2030-06-15"),
+        ("8100000099", "2030-6-15"),
+        ("8100000099", "2030-06-15T00:00:00Z"),
+    ],
+)
+def test_schedule_rejects_invalid_request_before_client_construction(
+    workout_id: object, scheduled_date: object
+) -> None:
+    constructions = 0
+
+    def factory() -> SyntheticClient:
+        nonlocal constructions
+        constructions += 1
+        return SyntheticClient()
+
+    with pytest.raises(InvalidWorkoutRequestError):
+        GarminWorkoutProvider(factory).schedule_existing_workout(
+            workout_id,
+            scheduled_date,  # type: ignore[arg-type]
+        )
+
+    assert constructions == 0
+
+
+def test_schedule_checks_duplicate_then_writes_exactly_once() -> None:
+    client = SyntheticClient()
+
+    result = provider(client).schedule_existing_workout("8100000099", "2030-06-15")
+
+    assert result == {
+        "scheduled": True,
+        "already_scheduled": False,
+        "scheduled_workout_id": "8300000099",
+        "workout_id": "8100000099",
+        "scheduled_date": "2030-06-15",
+        "message": "Exactly one existing workout was scheduled in Garmin Connect.",
+    }
+    assert client.calls == [
+        ("get_scheduled_workouts", (2030, 6)),
+        ("schedule_workout", ("8100000099", "2030-06-15")),
+    ]
+    rendered = repr(result).casefold()
+    assert "owner" not in rendered
+    assert "url" not in rendered
+    assert "private" not in rendered
+
+
+def test_exact_duplicate_is_idempotent_and_makes_no_schedule_call() -> None:
+    client = SyntheticClient(
+        monthly_responses={
+            (2030, 6): {
+                "scheduledWorkouts": [scheduled(8300000099, 8100000099, "2030-06-15")]
+            }
+        }
+    )
+
+    result = provider(client).schedule_existing_workout("8100000099", "2030-06-15")
+
+    assert result == {
+        "scheduled": False,
+        "already_scheduled": True,
+        "scheduled_workout_id": "8300000099",
+        "workout_id": "8100000099",
+        "scheduled_date": "2030-06-15",
+        "message": (
+            "No calendar change: this workout is already scheduled on the "
+            "requested date."
+        ),
+    }
+    assert client.calls == [("get_scheduled_workouts", (2030, 6))]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        [],
+        {"workoutId": 8100000099, "calendarDate": "2030-06-15"},
+        {
+            "workoutScheduleId": 8300000099,
+            "workoutId": 8100000098,
+            "calendarDate": "2030-06-15",
+        },
+        {
+            "workoutScheduleId": 8300000099,
+            "workoutId": 8100000099,
+            "calendarDate": "2030-06-16",
+        },
+    ],
+)
+def test_schedule_rejects_malformed_or_mismatched_response_without_retry(
+    response: object,
+) -> None:
+    client = SyntheticClient(schedule_response=response)
+
+    with pytest.raises(WorkoutUncertainResultError, match="inspect Garmin Connect"):
+        provider(client).schedule_existing_workout("8100000099", "2030-06-15")
+
+    assert [call[0] for call in client.calls] == [
+        "get_scheduled_workouts",
+        "schedule_workout",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("upstream_error", "expected_error", "message"),
+    [
+        (
+            GarminConnectAuthenticationError("private schedule auth text"),
+            WorkoutAuthenticationError,
+            "authentication failed",
+        ),
+        (
+            GarminConnectTooManyRequestsError("private schedule rate text"),
+            WorkoutEndpointError,
+            "rate limit",
+        ),
+        (
+            GarminConnectConnectionError("private uncertain text"),
+            WorkoutUncertainResultError,
+            "uncertain",
+        ),
+    ],
+)
+def test_schedule_maps_write_failures_safely_without_retry(
+    upstream_error: Exception,
+    expected_error: type[Exception],
+    message: str,
+) -> None:
+    client = SyntheticClient(write_error=upstream_error)
+
+    with pytest.raises(expected_error, match=message) as raised:
+        provider(client).schedule_existing_workout("8100000099", "2030-06-15")
+
+    assert "private" not in str(raised.value)
+    assert [call[0] for call in client.calls] == [
+        "get_scheduled_workouts",
+        "schedule_workout",
+    ]
+
+
+def test_schedule_maps_unsupported_client_without_fallback() -> None:
+    class UnsupportedClient:
+        def get_scheduled_workouts(self, year: int, month: int) -> dict[str, object]:
+            return {"calendarItems": []}
+
+    with pytest.raises(WorkoutUnsupportedError, match="does not support"):
+        GarminWorkoutProvider(
+            lambda: UnsupportedClient()  # type: ignore[arg-type]
+        ).schedule_existing_workout("8100000099", "2030-06-15")
+
+
+def test_schedule_blocks_dependency_auth_replay_after_first_http_attempt() -> None:
+    class ReplayTransport:
+        def __init__(self) -> None:
+            self.http_attempts = 0
+            self.refreshes = 0
+
+        def _refresh_session(self) -> None:
+            self.refreshes += 1
+
+    class ReplayClient:
+        def __init__(self) -> None:
+            self.client = ReplayTransport()
+
+        def get_scheduled_workouts(self, year: int, month: int) -> dict[str, object]:
+            return {"calendarItems": []}
+
+        def schedule_workout(self, workout_id: str, date_str: str) -> object:
+            self.client.http_attempts += 1
+            self.client._refresh_session()
+            self.client.http_attempts += 1
+            return {}
+
+    client = ReplayClient()
+
+    with pytest.raises(WorkoutAuthenticationError, match="authentication failed"):
+        GarminWorkoutProvider(
+            lambda: client  # type: ignore[arg-type]
+        ).schedule_existing_workout("8100000099", "2030-06-15")
+
+    assert client.client.http_attempts == 1
+    assert client.client.refreshes == 0
+    client.client._refresh_session()
+    assert client.client.refreshes == 1
+
+
+def test_scheduled_workout_lookup_returns_only_normalized_assignment() -> None:
+    client = SyntheticClient(
+        scheduled_lookup_response={
+            **scheduled(8300000099, 8100000099, "2030-06-15"),
+            "ownerId": 12345,
+            "url": "https://private.invalid/schedule",
+        }
+    )
+
+    result = provider(client).scheduled_workout("8300000099")
+
+    assert result["scheduled_workout_id"] == "8300000099"
+    assert result["workout_id"] == "8100000099"
+    assert result["scheduled_date"] == "2030-06-15"
+    assert "owner" not in repr(result).casefold()
+    assert "url" not in repr(result).casefold()
+    assert client.calls == [("get_scheduled_workout_by_id", ("8300000099",))]
+
+
+def test_scheduled_workout_lookup_maps_not_found_safely() -> None:
+    client = SyntheticClient(
+        error=GarminConnectNotFoundError("private missing assignment")
+    )
+
+    with pytest.raises(WorkoutNotFoundError, match="not found") as raised:
+        provider(client).scheduled_workout("8300000099")
+
+    assert "private" not in str(raised.value)
+
+
+def test_unschedule_reads_assignment_then_deletes_assignment_once() -> None:
+    client = SyntheticClient()
+
+    result = provider(client).unschedule_existing_workout("8300000099")
+
+    assert result == {
+        "unscheduled": True,
+        "scheduled_workout_id": "8300000099",
+        "workout_id": "8100000099",
+        "scheduled_date": "2030-06-15",
+        "workout_deleted": False,
+        "message": (
+            "Only the Garmin calendar assignment was removed; the workout "
+            "template was not deleted."
+        ),
+    }
+    assert client.calls == [
+        ("get_scheduled_workout_by_id", ("8300000099",)),
+        ("unschedule_workout", ("8300000099",)),
+    ]
+
+
+def test_unschedule_uncertain_failure_is_not_retried_or_rolled_back() -> None:
+    client = SyntheticClient(
+        write_error=GarminConnectConnectionError("private uncertain delete text")
+    )
+
+    with pytest.raises(WorkoutUncertainResultError, match="uncertain") as raised:
+        provider(client).unschedule_existing_workout("8300000099")
+
+    assert "private" not in str(raised.value)
+    assert [call[0] for call in client.calls] == [
+        "get_scheduled_workout_by_id",
+        "unschedule_workout",
+    ]

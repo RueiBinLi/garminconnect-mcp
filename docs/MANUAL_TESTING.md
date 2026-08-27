@@ -1,3 +1,129 @@
+# Completed Milestone 9 Safe Scheduling and Unscheduling Verification
+
+Milestone 9 was completed and manually verified on 2026-08-27. After all offline
+checks passed, exactly one existing test workout was scheduled following exact
+approval. The user verified the assignment, then separately approved removal of
+only that assignment and verified that the underlying template remained intact.
+No private identifier or calendar value is retained in this record. Milestone 10
+has not started.
+
+## Safety boundary
+
+Use only these Milestone 9 tools:
+
+- `garmin_preview_workout_schedule`
+- `garmin_schedule_existing_workout`
+- `garmin_unschedule_existing_workout`
+
+Do not use the legacy scheduling, combined upload-and-schedule, or unscheduling
+tools. Do not create another workout, modify or delete a template, submit Garmin
+JSON, call a device-push method, retry an uncertain result, or automatically
+clean up the test assignment.
+
+All IDs are private runtime inputs. Never save or repeat their values in Git,
+documentation, tests, fixtures, logs, commits, summaries, or final reports.
+Dates are strict Garmin calendar labels in `YYYY-MM-DD`; they are not timestamps
+and carry no timezone or offset.
+
+## Required offline verification before either write
+
+Run:
+
+```bash
+scripts/check-private-output.sh
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m compileall -q src
+```
+
+Also run an offline stdio initialization and tool-discovery check, offline MCP
+preview and omitted/false-confirmation calls with a forbidden client factory,
+and confirmed scheduling/unscheduling calls with synthetic fake clients only.
+The source audit must confirm that the installed scheduling wrappers have no
+transient retry decorator. The provider's single-attempt guard must prove that
+the low-level HTTP-401 refresh path stops before a second write request.
+
+Offline acceptance:
+
+- [x] Strict single IDs, strict dates, strict Booleans, and unknown-field
+      rejection occur before client construction.
+- [x] Schedule preview and false/omitted schedule confirmation construct no
+      client and make no network or write call.
+- [x] Confirmed synthetic scheduling performs one duplicate read and at most one
+      scheduling call.
+- [x] An exact workout/date duplicate is idempotent and makes no schedule call.
+- [x] Malformed, missing-ID, mismatched, authentication, rate-limit, endpoint,
+      unsupported-client, and uncertain synthetic outcomes are secret-safe and
+      never retried.
+- [x] Compact results discard Garmin payloads, account metadata, URLs, device
+      identifiers, and unrelated IDs.
+- [x] Unscheduling preview reads exactly one normalized assignment and performs
+      no write.
+- [x] Confirmed synthetic unscheduling re-reads that assignment and invokes
+      unscheduling once without deleting its template.
+- [x] No upload, create, clone, modify, template-delete, device-push, retry,
+      rollback, or automatic cleanup path is invoked.
+- [x] Existing schemas, legacy tools, and tests retain their behavior.
+
+## Stage 1 — exact scheduling proposal and approval
+
+Use the existing Milestone 8 test workout. Obtain privately at runtime:
+
+- its exact workout ID;
+- one exact future `YYYY-MM-DD` Garmin calendar date.
+
+Show the user only the exact private proposal in the active conversation:
+
+- `workout_id`;
+- `scheduled_date`;
+- exactly one existing workout will be scheduled;
+- an exact same-workout/same-date duplicate will cause no write;
+- no workout will be created, uploaded, cloned, modified, deleted, or directly
+  pushed to a device;
+- Garmin itself may synchronize the calendar assignment to connected devices.
+
+Wait for explicit approval of those exact values. The milestone-start request
+is not approval. After approval, invoke only
+`garmin_schedule_existing_workout(..., confirmed=true)` once. Do not retry an
+uncertain result. Report only its compact normalized result.
+
+Manual scheduling acceptance:
+
+- [x] Exactly one assignment appeared on the intended Garmin calendar date.
+- [x] It referenced the correct existing test workout.
+- [x] No duplicate assignment existed.
+- [x] The underlying workout was not modified.
+- [x] No unrelated calendar item changed.
+- [x] Any device synchronization matched Garmin's normal behavior; this server
+      made no explicit device-push call.
+
+Do not automatically unschedule. Wait for the user's explicit confirmation that
+all scheduling checks passed.
+
+## Stage 2 — exact unscheduling proposal and approval
+
+After scheduling verification passes, call
+`garmin_unschedule_existing_workout` with confirmation omitted/false to show the
+exact normalized assignment. Wait for a second explicit approval of that
+scheduled-workout ID. Then call the same tool once with `confirmed=true`. Do not
+retry an uncertain result.
+
+Manual unscheduling acceptance:
+
+- [x] The calendar assignment was removed.
+- [x] The underlying workout template still exists and opens normally.
+- [x] No unrelated calendar item changed.
+- [x] No duplicate or unexpected state remains.
+
+Both checklists passed. All required checks were rerun, only non-private
+acceptance facts were recorded, and the focused Milestone 9 change was committed.
+Pushing to `origin/main` still requires explicit authorization. Milestone 10 was
+not started.
+
+---
+
 # Completed Milestone 8 Validated Workout-Creation Verification
 
 Milestone 8 was completed and manually verified on 2026-08-27. All required

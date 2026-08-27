@@ -185,6 +185,20 @@ class FakeClient:
             },
         }
 
+    def get_scheduled_workout_by_id(
+        self, scheduled_workout_id: str
+    ) -> dict[str, object]:
+        self.calls.append(("get_scheduled_workout_by_id", (scheduled_workout_id,), {}))
+        return {
+            "scheduledWorkoutId": scheduled_workout_id,
+            "date": "2026-05-24",
+            "workout": {
+                "workoutId": 456,
+                "workoutName": "Easy Run",
+                "sportType": {"sportTypeKey": "running"},
+            },
+        }
+
     def upload_workout(self, workout_json: object) -> dict[str, object]:
         self.calls.append(("upload_workout", (workout_json,), {}))
         return {
@@ -790,6 +804,248 @@ def test_running_workout_creation_rejects_arbitrary_or_bulk_payloads_before_clie
 
     with pytest.raises(ToolError):
         anyio.run(call_with_unsafe_definition)
+
+    assert fake_client.calls == []
+
+
+def test_schedule_preview_is_offline_and_compact(fake_client: FakeClient) -> None:
+    assert server.garmin_preview_workout_schedule("456", "2026-05-25") == {
+        "scheduled": False,
+        "already_scheduled": False,
+        "scheduled_workout_id": None,
+        "workout_id": "456",
+        "scheduled_date": "2026-05-25",
+        "message": (
+            "Preview only: no Garmin calendar change occurred. A confirmed "
+            "schedule may later be synchronized by Garmin to connected devices; "
+            "this server will not call a device-push method."
+        ),
+    }
+    assert fake_client.calls == []
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "garmin_preview_workout_schedule",
+        "garmin_schedule_existing_workout",
+        "garmin_unschedule_existing_workout",
+    ],
+)
+def test_milestone_9_tool_schemas_forbid_unknown_fields(tool_name: str) -> None:
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+
+    assert tool is not None
+    assert tool.parameters["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "extra_arguments"),
+    [
+        ("garmin_preview_workout_schedule", {}),
+        ("garmin_schedule_existing_workout", {}),
+        ("garmin_schedule_existing_workout", {"confirmed": False}),
+    ],
+)
+def test_schedule_preview_and_unconfirmed_call_do_not_construct_client_through_mcp(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    extra_arguments: dict[str, object],
+) -> None:
+    constructions = 0
+
+    def forbidden_client() -> object:
+        nonlocal constructions
+        constructions += 1
+        raise AssertionError("Garmin client must not be constructed")
+
+    monkeypatch.setattr(server, "_client", forbidden_client)
+
+    async def call_tool() -> object:
+        return await server.mcp.call_tool(
+            tool_name,
+            {
+                "workout_id": "456",
+                "scheduled_date": "2026-05-25",
+                **extra_arguments,
+            },
+        )
+
+    _, result = anyio.run(call_tool)
+
+    assert result["scheduled"] is False
+    assert constructions == 0
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"workout_id": 456, "scheduled_date": "2026-05-25"},
+        {"workout_id": ["456"], "scheduled_date": "2026-05-25"},
+        {"workout_id": {"id": "456"}, "scheduled_date": "2026-05-25"},
+        {"workout_id": "0", "scheduled_date": "2026-05-25"},
+        {"workout_id": "0456", "scheduled_date": "2026-05-25"},
+        {"workout_id": "456 ", "scheduled_date": "2026-05-25"},
+        {
+            "workout_id": "https://private.invalid/456",
+            "scheduled_date": "2026-05-25",
+        },
+        {"workout_id": "456", "scheduled_date": ["2026-05-25"]},
+        {"workout_id": "456", "scheduled_date": "2026-5-25"},
+        {"workout_id": "456", "scheduled_date": "2026-05-25T00:00:00Z"},
+        {
+            "workout_id": "456",
+            "scheduled_date": "2026-05-25",
+            "confirmed": "true",
+        },
+        {
+            "workout_id": "456",
+            "scheduled_date": "2026-05-25",
+            "confirmed": 1,
+        },
+        {
+            "workout_id": "456",
+            "scheduled_date": "2026-05-25",
+            "confirmed": True,
+            "unknown": {"garmin": "json"},
+        },
+    ],
+)
+def test_schedule_rejects_unsafe_inputs_before_client_through_mcp(
+    fake_client: FakeClient, arguments: dict[str, object]
+) -> None:
+    async def call_invalid() -> None:
+        await server.mcp.call_tool("garmin_schedule_existing_workout", arguments)
+
+    with pytest.raises(ToolError):
+        anyio.run(call_invalid)
+
+    assert fake_client.calls == []
+
+
+def test_confirmed_schedule_uses_duplicate_read_then_one_schedule_call_through_mcp(
+    fake_client: FakeClient,
+) -> None:
+    async def call_confirmed() -> object:
+        return await server.mcp.call_tool(
+            "garmin_schedule_existing_workout",
+            {
+                "workout_id": "456",
+                "scheduled_date": "2026-05-25",
+                "confirmed": True,
+            },
+        )
+
+    _, result = anyio.run(call_confirmed)
+
+    assert result == {
+        "scheduled": True,
+        "already_scheduled": False,
+        "scheduled_workout_id": "789",
+        "workout_id": "456",
+        "scheduled_date": "2026-05-25",
+        "message": "Exactly one existing workout was scheduled in Garmin Connect.",
+    }
+    assert fake_client.calls == [
+        ("get_scheduled_workouts", (2026, 5), {}),
+        ("schedule_workout", ("456", "2026-05-25"), {}),
+    ]
+
+
+def test_confirmed_exact_duplicate_makes_no_schedule_call_through_mcp(
+    fake_client: FakeClient,
+) -> None:
+    async def call_duplicate() -> object:
+        return await server.mcp.call_tool(
+            "garmin_schedule_existing_workout",
+            {
+                "workout_id": "456",
+                "scheduled_date": "2026-05-24",
+                "confirmed": True,
+            },
+        )
+
+    _, result = anyio.run(call_duplicate)
+
+    assert result["scheduled"] is False
+    assert result["already_scheduled"] is True
+    assert result["scheduled_workout_id"] == "789"
+    assert fake_client.calls == [("get_scheduled_workouts", (2026, 5), {})]
+
+
+def test_unschedule_default_previews_exact_assignment_without_write_through_mcp(
+    fake_client: FakeClient,
+) -> None:
+    async def call_preview() -> object:
+        return await server.mcp.call_tool(
+            "garmin_unschedule_existing_workout",
+            {"scheduled_workout_id": "789"},
+        )
+
+    _, result = anyio.run(call_preview)
+
+    assert result == {
+        "unscheduled": False,
+        "scheduled_workout_id": "789",
+        "workout_id": "456",
+        "scheduled_date": "2026-05-24",
+        "workout_deleted": False,
+        "message": (
+            "Preview only: no calendar assignment was removed. Call again with "
+            "confirmed=true only after reviewing this exact assignment; the "
+            "underlying workout template will not be deleted."
+        ),
+    }
+    assert fake_client.calls == [("get_scheduled_workout_by_id", ("789",), {})]
+
+
+def test_confirmed_unschedule_reads_then_unschedules_once_through_mcp(
+    fake_client: FakeClient,
+) -> None:
+    async def call_confirmed() -> object:
+        return await server.mcp.call_tool(
+            "garmin_unschedule_existing_workout",
+            {"scheduled_workout_id": "789", "confirmed": True},
+        )
+
+    _, result = anyio.run(call_confirmed)
+
+    assert result == {
+        "unscheduled": True,
+        "scheduled_workout_id": "789",
+        "workout_id": "456",
+        "scheduled_date": "2026-05-24",
+        "workout_deleted": False,
+        "message": (
+            "Only the Garmin calendar assignment was removed; the workout "
+            "template was not deleted."
+        ),
+    }
+    assert fake_client.calls == [
+        ("get_scheduled_workout_by_id", ("789",), {}),
+        ("unschedule_workout", ("789",), {}),
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"scheduled_workout_id": 789},
+        {"scheduled_workout_id": ["789"]},
+        {"scheduled_workout_id": "0789"},
+        {"scheduled_workout_id": "789", "confirmed": "true"},
+        {"scheduled_workout_id": "789", "confirmed": 1},
+        {"scheduled_workout_id": "789", "confirmed": True, "unknown": True},
+    ],
+)
+def test_unschedule_rejects_unsafe_inputs_before_client_through_mcp(
+    fake_client: FakeClient, arguments: dict[str, object]
+) -> None:
+    async def call_invalid() -> None:
+        await server.mcp.call_tool("garmin_unschedule_existing_workout", arguments)
+
+    with pytest.raises(ToolError):
+        anyio.run(call_invalid)
 
     assert fake_client.calls == []
 

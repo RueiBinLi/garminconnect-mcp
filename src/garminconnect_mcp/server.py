@@ -10,7 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
-from pydantic import StrictBool, StrictInt
+from pydantic import StrictBool, StrictInt, StrictStr
 
 from .provider import (
     GarminActivityProvider,
@@ -18,6 +18,8 @@ from .provider import (
     GarminWorkoutProvider,
     InvalidActivityRequestError,
     InvalidWorkoutRequestError,
+    validate_workout_date,
+    validate_workout_identifier,
 )
 from .training import (
     compare_recent_weekly_longest_runs,
@@ -31,6 +33,17 @@ from .workout_builder import (
 )
 
 mcp = FastMCP("Garmin Connect")
+
+
+def _forbid_unknown_tool_arguments(tool_name: str) -> None:
+    """Tighten one generated FastMCP argument model without changing other tools."""
+    tool = mcp._tool_manager.get_tool(tool_name)
+    if tool is None:  # pragma: no cover - registration is adjacent and deterministic
+        raise RuntimeError(f"MCP tool was not registered: {tool_name}")
+    argument_model = tool.fn_metadata.arg_model
+    argument_model.model_config["extra"] = "forbid"
+    argument_model.model_rebuild(force=True)
+    tool.parameters = argument_model.model_json_schema(by_alias=True)
 
 
 def _env_path() -> Path:
@@ -508,6 +521,109 @@ def garmin_create_running_workout(
             ),
         }
     return _workout_provider().create_running_workout(definition)
+
+
+def _schedule_preview(workout_id: Any, scheduled_date: Any) -> dict[str, Any]:
+    workout_id = validate_workout_identifier(workout_id, name="workout_id")
+    scheduled_date = validate_workout_date(scheduled_date, name="scheduled_date")
+    return {
+        "scheduled": False,
+        "already_scheduled": False,
+        "scheduled_workout_id": None,
+        "workout_id": workout_id,
+        "scheduled_date": scheduled_date,
+        "message": (
+            "Preview only: no Garmin calendar change occurred. A confirmed "
+            "schedule may later be synchronized by Garmin to connected devices; "
+            "this server will not call a device-push method."
+        ),
+    }
+
+
+@mcp.tool()
+def garmin_preview_workout_schedule(
+    workout_id: StrictStr, scheduled_date: StrictStr
+) -> dict[str, Any]:
+    """Preview scheduling one existing workout entirely offline.
+
+    workout_id must be one positive numeric Garmin identifier and scheduled_date
+    must be exactly YYYY-MM-DD. This tool validates the complete request without
+    constructing a Garmin client and makes no network, calendar, workout, or
+    device-push call.
+    """
+    return _schedule_preview(workout_id, scheduled_date)
+
+
+_forbid_unknown_tool_arguments("garmin_preview_workout_schedule")
+
+
+@mcp.tool()
+def garmin_schedule_existing_workout(
+    workout_id: StrictStr,
+    scheduled_date: StrictStr,
+    confirmed: StrictBool = False,
+) -> dict[str, Any]:
+    """Schedule exactly one existing workout after preview and confirmation.
+
+    The default confirmed=false is an offline no-write path and directs the
+    caller to garmin_preview_workout_schedule. A confirmed call first performs
+    one normalized read-only duplicate check for the same workout and date. An
+    exact duplicate is idempotent and causes no schedule call. Otherwise the
+    provider invokes scheduling once, without create, upload, modify, delete,
+    retry, rollback, or direct device push.
+    """
+    preview = _schedule_preview(workout_id, scheduled_date)
+    if not isinstance(confirmed, bool):
+        raise InvalidWorkoutRequestError("confirmed must be a boolean")
+    if not confirmed:
+        preview["message"] = (
+            "Not scheduled: review garmin_preview_workout_schedule, then call "
+            "again with confirmed=true. No Garmin client or calendar change "
+            "occurred."
+        )
+        return preview
+    return _workout_provider().schedule_existing_workout(workout_id, scheduled_date)
+
+
+_forbid_unknown_tool_arguments("garmin_schedule_existing_workout")
+
+
+@mcp.tool()
+def garmin_unschedule_existing_workout(
+    scheduled_workout_id: StrictStr, confirmed: StrictBool = False
+) -> dict[str, Any]:
+    """Preview or remove exactly one existing Garmin calendar assignment.
+
+    The default confirmed=false uses Garmin's read-only scheduled-workout lookup
+    to expose the exact normalized assignment and makes no write call. After
+    reviewing that result, confirmed=true repeats the safe lookup and invokes
+    unscheduling exactly once. It never deletes or modifies the underlying
+    workout template and never retries, rolls back, or pushes to a device.
+    """
+    scheduled_workout_id = validate_workout_identifier(
+        scheduled_workout_id, name="scheduled_workout_id"
+    )
+    if not isinstance(confirmed, bool):
+        raise InvalidWorkoutRequestError("confirmed must be a boolean")
+    if confirmed:
+        return _workout_provider().unschedule_existing_workout(scheduled_workout_id)
+
+    assignment = _workout_provider().scheduled_workout(scheduled_workout_id)
+    return {
+        "unscheduled": False,
+        "scheduled_workout_id": scheduled_workout_id,
+        "workout_id": assignment["workout_id"],
+        "scheduled_date": assignment["scheduled_date"],
+        "workout_deleted": False,
+        "message": (
+            "Preview only: no calendar assignment was removed. Call again with "
+            "confirmed=true only after reviewing this exact assignment; the "
+            "underlying workout template will not be deleted."
+        ),
+    }
+
+
+_forbid_unknown_tool_arguments("garmin_unschedule_existing_workout")
 
 
 @mcp.tool()

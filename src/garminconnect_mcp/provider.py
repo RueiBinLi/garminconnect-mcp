@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date
+from threading import RLock
 from typing import Any, Protocol
 
 from garminconnect import (
@@ -90,7 +91,13 @@ class GarminClient(Protocol):
 
     def get_scheduled_workouts(self, year: int, month: int) -> Any: ...
 
+    def get_scheduled_workout_by_id(self, scheduled_workout_id: str) -> Any: ...
+
     def upload_workout(self, workout_json: dict[str, Any]) -> Any: ...
+
+    def schedule_workout(self, workout_id: str, date_str: str) -> Any: ...
+
+    def unschedule_workout(self, scheduled_workout_id: str) -> Any: ...
 
 
 class ActivityProviderError(RuntimeError):
@@ -350,12 +357,44 @@ class WorkoutUnsupportedError(WorkoutProviderError):
     pass
 
 
+class WorkoutNotFoundError(WorkoutProviderError):
+    pass
+
+
+class WorkoutUncertainResultError(WorkoutProviderError):
+    pass
+
+
 class InvalidWorkoutRequestError(WorkoutProviderError, ValueError):
     pass
 
 
+def validate_workout_identifier(value: Any, *, name: str) -> str:
+    valid = (
+        isinstance(value, str)
+        and value.isascii()
+        and value.isdecimal()
+        and not value.startswith("0")
+        and len(value) <= 20
+    )
+    if not valid:
+        raise InvalidWorkoutRequestError(
+            f"{name} must be a positive numeric identifier"
+        )
+    return value
+
+
+def validate_workout_date(value: Any, *, name: str) -> str:
+    try:
+        return validate_date(value, name=name)
+    except ValueError as exc:
+        raise InvalidWorkoutRequestError(str(exc)) from exc
+
+
 class GarminWorkoutProvider:
     """Isolate unofficial Garmin workout and calendar calls from MCP code."""
+
+    _write_guard = RLock()
 
     def __init__(self, client_factory: Callable[[], GarminClient]) -> None:
         self._client_factory = client_factory
@@ -391,6 +430,166 @@ class GarminWorkoutProvider:
             "total_distance_m": aggregates["total_distance_m"],
             "scheduled": False,
             "message": "Workout created in Garmin Connect but not scheduled.",
+        }
+
+    def schedule_existing_workout(
+        self, workout_id: str, scheduled_date: str
+    ) -> dict[str, Any]:
+        """Schedule one existing template after an exact duplicate read."""
+        workout_id = self._identifier(workout_id, name="workout_id")
+        scheduled_date = self._date(scheduled_date, name="scheduled_date")
+
+        existing = self.scheduled_workouts(scheduled_date, scheduled_date)
+        duplicate = next(
+            (
+                item
+                for item in existing
+                if item["workout_id"] == workout_id
+                and item["scheduled_date"] == scheduled_date
+            ),
+            None,
+        )
+        if duplicate is not None:
+            scheduled_workout_id = duplicate["scheduled_workout_id"]
+            if scheduled_workout_id is None:
+                raise WorkoutResponseError(
+                    "Existing Garmin schedule did not include a schedule ID"
+                )
+            scheduled_workout_id = self._identifier(
+                scheduled_workout_id, name="scheduled_workout_id"
+            )
+            return {
+                "scheduled": False,
+                "already_scheduled": True,
+                "scheduled_workout_id": scheduled_workout_id,
+                "workout_id": workout_id,
+                "scheduled_date": scheduled_date,
+                "message": (
+                    "No calendar change: this workout is already scheduled "
+                    "on the requested date."
+                ),
+            }
+
+        def schedule(client: GarminClient) -> Any:
+            return self._invoke_write_method_once(
+                client,
+                "schedule_workout",
+                workout_id,
+                scheduled_date,
+                unsupported_message=(
+                    "Installed Garmin client does not support workout scheduling"
+                ),
+            )
+
+        raw = self._write_once("workout scheduling", schedule)
+        try:
+            normalized = normalize_scheduled_workout(raw)
+        except MalformedWorkoutResponseError as exc:
+            raise WorkoutUncertainResultError(
+                "Garmin scheduling result is uncertain; inspect Garmin Connect "
+                "before any retry"
+            ) from exc
+
+        scheduled_workout_id = normalized["scheduled_workout_id"]
+        if scheduled_workout_id is None:
+            raise WorkoutUncertainResultError(
+                "Garmin scheduling result is uncertain because no schedule ID "
+                "was returned; inspect Garmin Connect before any retry"
+            )
+        scheduled_workout_id = self._identifier(
+            scheduled_workout_id, name="scheduled_workout_id", response=True
+        )
+        response_workout_id = normalized["workout_id"]
+        response_date = normalized["scheduled_date"]
+        if response_workout_id is not None and response_workout_id != workout_id:
+            raise WorkoutUncertainResultError(
+                "Garmin scheduling returned an unexpected workout ID; inspect "
+                "Garmin Connect before any retry"
+            )
+        if response_date is not None and response_date != scheduled_date:
+            raise WorkoutUncertainResultError(
+                "Garmin scheduling returned an unexpected calendar date; inspect "
+                "Garmin Connect before any retry"
+            )
+        return {
+            "scheduled": True,
+            "already_scheduled": False,
+            "scheduled_workout_id": scheduled_workout_id,
+            "workout_id": workout_id,
+            "scheduled_date": scheduled_date,
+            "message": "Exactly one existing workout was scheduled in Garmin Connect.",
+        }
+
+    def scheduled_workout(
+        self, scheduled_workout_id: str
+    ) -> NormalizedScheduledWorkout:
+        """Read one assignment by ID for a safe unscheduling preview."""
+        scheduled_workout_id = self._identifier(
+            scheduled_workout_id, name="scheduled_workout_id"
+        )
+
+        def read(client: GarminClient) -> Any:
+            method = getattr(client, "get_scheduled_workout_by_id", None)
+            if not callable(method):
+                raise WorkoutUnsupportedError(
+                    "Installed Garmin client does not support scheduled-workout lookup"
+                )
+            return method(scheduled_workout_id)
+
+        raw = self._call("scheduled-workout lookup", read, not_found=True)
+        try:
+            normalized = normalize_scheduled_workout(raw)
+        except MalformedWorkoutResponseError as exc:
+            raise WorkoutResponseError(str(exc)) from exc
+        returned_id = normalized["scheduled_workout_id"]
+        if returned_id is None:
+            raise WorkoutResponseError(
+                "Garmin scheduled-workout response did not include a schedule ID"
+            )
+        returned_id = self._identifier(
+            returned_id, name="scheduled_workout_id", response=True
+        )
+        if returned_id != scheduled_workout_id:
+            raise WorkoutResponseError(
+                "Garmin scheduled-workout response returned an unexpected schedule ID"
+            )
+        workout_id = normalized["workout_id"]
+        scheduled_date = normalized["scheduled_date"]
+        if workout_id is None or scheduled_date is None:
+            raise WorkoutResponseError(
+                "Garmin scheduled-workout response omitted assignment details"
+            )
+        self._identifier(workout_id, name="workout_id", response=True)
+        return normalized
+
+    def unschedule_existing_workout(self, scheduled_workout_id: str) -> dict[str, Any]:
+        """Remove one verified calendar assignment without deleting its template."""
+        scheduled_workout_id = self._identifier(
+            scheduled_workout_id, name="scheduled_workout_id"
+        )
+        assignment = self.scheduled_workout(scheduled_workout_id)
+
+        def unschedule(client: GarminClient) -> Any:
+            return self._invoke_write_method_once(
+                client,
+                "unschedule_workout",
+                scheduled_workout_id,
+                unsupported_message=(
+                    "Installed Garmin client does not support workout unscheduling"
+                ),
+            )
+
+        self._write_once("workout unscheduling", unschedule)
+        return {
+            "unscheduled": True,
+            "scheduled_workout_id": scheduled_workout_id,
+            "workout_id": assignment["workout_id"],
+            "scheduled_date": assignment["scheduled_date"],
+            "workout_deleted": False,
+            "message": (
+                "Only the Garmin calendar assignment was removed; the workout "
+                "template was not deleted."
+            ),
         }
 
     def saved_workouts(
@@ -483,10 +682,16 @@ class GarminWorkoutProvider:
 
     @staticmethod
     def _date(value: Any, *, name: str) -> str:
+        return validate_workout_date(value, name=name)
+
+    @staticmethod
+    def _identifier(value: Any, *, name: str, response: bool = False) -> str:
         try:
-            return validate_date(value, name=name)
-        except ValueError as exc:
-            raise InvalidWorkoutRequestError(str(exc)) from exc
+            return validate_workout_identifier(value, name=name)
+        except InvalidWorkoutRequestError as exc:
+            if response:
+                raise WorkoutResponseError(f"Garmin response {exc}") from exc
+            raise
 
     @staticmethod
     def _scheduled_sort_key(
@@ -498,7 +703,13 @@ class GarminWorkoutProvider:
             item["workout_id"] or "",
         )
 
-    def _call(self, operation: str, callback: Callable[[GarminClient], Any]) -> Any:
+    def _call(
+        self,
+        operation: str,
+        callback: Callable[[GarminClient], Any],
+        *,
+        not_found: bool = False,
+    ) -> Any:
         try:
             return callback(self._client_factory())
         except WorkoutProviderError:
@@ -511,7 +722,84 @@ class GarminWorkoutProvider:
             raise WorkoutEndpointError(
                 f"Garmin {operation} endpoint rate limit was reached"
             ) from exc
-        except (GarminConnectConnectionError, GarminConnectNotFoundError) as exc:
+        except GarminConnectNotFoundError as exc:
+            if not_found:
+                raise WorkoutNotFoundError(
+                    "Garmin scheduled workout was not found"
+                ) from exc
+            raise WorkoutEndpointError(f"Garmin {operation} endpoint failed") from exc
+        except GarminConnectConnectionError as exc:
             raise WorkoutEndpointError(f"Garmin {operation} endpoint failed") from exc
         except Exception as exc:
             raise WorkoutEndpointError(f"Garmin {operation} endpoint failed") from exc
+
+    def _write_once(
+        self, operation: str, callback: Callable[[GarminClient], Any]
+    ) -> Any:
+        """Invoke one write callback without provider-level retry or verification."""
+        try:
+            return callback(self._client_factory())
+        except WorkoutProviderError:
+            raise
+        except GarminConnectAuthenticationError as exc:
+            raise WorkoutAuthenticationError(
+                "Garmin authentication failed; refresh the saved login"
+            ) from exc
+        except GarminConnectTooManyRequestsError as exc:
+            raise WorkoutEndpointError(
+                f"Garmin {operation} endpoint rate limit was reached"
+            ) from exc
+        except GarminConnectNotFoundError as exc:
+            raise WorkoutEndpointError(f"Garmin {operation} endpoint failed") from exc
+        except Exception as exc:
+            raise WorkoutUncertainResultError(
+                f"Garmin {operation} result is uncertain; inspect Garmin Connect "
+                "before any retry"
+            ) from exc
+
+    @classmethod
+    def _invoke_write_method_once(
+        cls,
+        client: GarminClient,
+        method_name: str,
+        *args: Any,
+        unsupported_message: str,
+    ) -> Any:
+        """Block garminconnect's internal HTTP-401 replay for one write.
+
+        Version 0.3.11's public schedule wrappers call the low-level client once,
+        but that client normally refreshes authentication and repeats a request
+        after a 401. The immediately preceding read already refreshes expiring
+        credentials. During only the write call, fail closed if another refresh
+        is requested so an HTTP request can never be replayed.
+        """
+        method = getattr(client, method_name, None)
+        if not callable(method):
+            raise WorkoutUnsupportedError(unsupported_message)
+
+        transport = getattr(client, "client", None)
+        refresh = getattr(transport, "_refresh_session", None)
+        if transport is None or not callable(refresh):
+            return method(*args)
+
+        def block_write_replay() -> None:
+            raise GarminConnectAuthenticationError(
+                "Authentication refresh during a Garmin write is not replayed"
+            )
+
+        with cls._write_guard:
+            instance_values = getattr(transport, "__dict__", None)
+            if not isinstance(instance_values, dict):
+                raise WorkoutUnsupportedError(
+                    "Installed Garmin client cannot guarantee single-attempt writes"
+                )
+            had_override = "_refresh_session" in instance_values
+            prior_override = instance_values.get("_refresh_session")
+            transport._refresh_session = block_write_replay
+            try:
+                return method(*args)
+            finally:
+                if had_override:
+                    transport._refresh_session = prior_override
+                else:
+                    del transport._refresh_session
