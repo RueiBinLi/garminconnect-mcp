@@ -30,6 +30,12 @@ Milestone 11 adds a read-only weekly running-proposal application service,
 strict desired-session constraints, and normalized configured running Zone 2
 reads. Offline verification and one manually accepted live proposal passed on
 2026-08-27 without a Garmin write or retained private value.
+Milestone 12 adds a process-local, expiring, one-use approval boundary around
+that exact proposal and sequentially composes the existing safe Milestone 10
+provider operation. Offline synthetic verification and one exact, separately
+approved live workflow passed on 2026-08-27. The user confirmed all creations
+and assignments, absence of duplicates, preservation of existing items, and no
+unrelated changes. Private live values were not retained.
 The subsequent naming extension adds strict half-marathon plan identity and a
 Monday plan anchor. The anchor week is `W01`; later proposal weeks derive their
 one-based two-digit week deterministically and cannot precede the anchor.
@@ -44,6 +50,7 @@ garminconnect-mcp/
 ├── src/garminconnect_mcp/heart_rate_zones.py # Pure zone normalization
 ├── src/garminconnect_mcp/training.py # Pure weekly and long-run aggregation
 ├── src/garminconnect_mcp/planner.py # Strict deterministic weekly proposal service
+├── src/garminconnect_mcp/weekly_scheduler.py # One-use weekly approval and execution
 ├── src/garminconnect_mcp/recovery.py # Pure recovery normalization and schemas
 ├── src/garminconnect_mcp/workouts.py # Pure workout normalization and schemas
 ├── src/garminconnect_mcp/workout_builder.py # Strict pre-write model, aggregation, and serializer
@@ -53,6 +60,7 @@ garminconnect-mcp/
 ├── tests/test_heart_rate_zones.py   # Synthetic zone/provider tests
 ├── tests/test_training.py           # Synthetic running aggregation tests
 ├── tests/test_planner.py            # Synthetic weekly proposal and safety tests
+├── tests/test_weekly_scheduler.py   # Approval, stale-state, and partial-write tests
 ├── tests/test_recovery.py           # Synthetic recovery normalization tests
 ├── tests/test_recovery_provider.py  # Synthetic recovery provider/error tests
 ├── tests/test_workouts.py           # Synthetic workout normalization tests
@@ -544,6 +552,67 @@ public code `HM`; arbitrary plan codes are rejected. Names use
 kilometers and retains a necessary decimal. This keeps Garmin Connect readable
 without using private identifiers or relying on calendar state.
 
+## Milestone 12 weekly approval and execution boundary
+
+Milestone 12 exposes a two-phase interface:
+
+```text
+garmin_preview_weekly_running_plan(week_start, constraints)
+    -> strict Milestone 11 validation and normalized reads
+    -> exact deterministic proposal and intended write order
+    -> SHA-256 fingerprint + opaque 15-minute approval token
+    -> process-local bounded approval store
+
+garmin_schedule_weekly_running_plan(token, fingerprint, confirmed=false)
+    -> false: offline lookup and no-write state
+    -> true: atomically consume one approval
+       -> recompute fingerprint
+       -> revalidate every definition, date, purpose, order, and aggregate
+       -> reread only the normalized Monday-Sunday calendar
+       -> stop on stale state or an exact-date conflict
+       -> for each approved session in ascending date/order:
+          create_and_schedule_running_workout(definition, exact_date)
+       -> stop immediately on known or uncertain failure
+```
+
+The deterministic fingerprint hashes canonical ASCII JSON containing the whole
+reviewed Milestone 11 response plus the exact ordered intended writes. The token
+is random, URL-safe, held only in process memory, capped at 32 pending approvals,
+expires after 15 minutes, and is consumed by one confirmed invocation. The
+client cannot submit or alter a proposal. A server restart, expiry, mismatched
+fingerprint, prior use, different preview, or different week cannot authorize a
+write.
+
+The approval store privately retains the normalized calendar identifiers needed
+to detect replacement of an otherwise similar commitment. Those identifiers are
+never hashed into public approval material, persisted, logged, or returned.
+Before the first write, the fresh normalized calendar snapshot must exactly
+equal the preview snapshot. Any difference makes the proposal stale; a newly
+occupied approved date is the narrower conflict case. The service never picks
+another date or changes an existing assignment.
+
+The only weekly write dependency is the existing Milestone 10 provider method.
+For each session it deterministically serializes one validated definition,
+uploads at most once, performs the existing duplicate calendar read for only
+the returned new workout ID and exact date, and schedules at most once. The
+weekly service does not call legacy tools. It cannot modify, unschedule, delete,
+clone, clean up, roll back, retry, or push to a device.
+
+Execution is sequential and is not a transaction. A failure preserves all
+earlier successful sessions. A scheduling failure preserves the current new
+unscheduled workout. Later sessions are not attempted. Malformed or uncertain
+creation results are treated as uncertain because Garmin may have accepted the
+write before returning an unusable response. Garmin has no stable creation
+idempotency key, so uncertain creation cannot be deduplicated safely. The one-use
+approval is never replayed; manual Garmin inspection is mandatory.
+
+The compact execution result reports only the week, proposal fingerprint,
+requested/completed counts, per-session public facts and aggregates, safe state,
+partial/uncertain flags, remaining not-attempted count, and next action. Workout
+IDs, schedule IDs, approval tokens, raw Garmin data, serialized payloads,
+endpoint names, URLs, account/profile fields, device identifiers, and upstream
+exception text do not cross the boundary.
+
 ## Codex integration
 
 Milestone 2 registers the server in the local Codex host configuration and adds
@@ -558,7 +627,7 @@ Codex host
     │ starts garminconnect-mcp serve
     ▼
 FastMCP stdio server
-    │ lists 26 MCP tools without contacting Garmin
+    │ lists 32 MCP tools without contacting Garmin
     │ invokes only an explicitly selected tool
     ▼
 Saved-token Garmin client
@@ -567,7 +636,7 @@ Saved-token Garmin client
 Neither configuration contains Garmin credentials, tokens, MFA values, or a
 repository-local token path. The untracked host configuration stores the
 absolute executable path and `serve` argument; authentication keeps using the
-external default token directory. All 28 tools remain discoverable so future
+external default token directory. All 32 tools remain discoverable so future
 milestones can use the same connection, but the project policy prompts before
 tools by default; only `garmin_connection_status` and `garmin_ping` have
 automatic approval.
@@ -633,7 +702,7 @@ deliberate MCP 2.x migration remains a possible later change.
 
 ## Existing MCP tools
 
-The server exposes 28 tools.
+The server exposes 32 tools.
 
 | Tool | Kind | Current behavior | Specification status |
 | --- | --- | --- | --- |
@@ -662,6 +731,9 @@ The server exposes 28 tools.
 | `garmin_unschedule_existing_workout` | Read/confirmation-gated delete | False/omitted confirmation reads one normalized assignment; true re-reads then removes only that assignment once | Milestone 9 complete and manually verified |
 | `garmin_preview_create_and_schedule_running_workout` | Offline pre-write | Strictly validates one definition and one date and returns normalized execution order, aggregates, and no-write warnings | Milestone 10 complete |
 | `garmin_create_and_schedule_running_workout` | Confirmation-gated write | False/omitted is offline; true uploads once and schedules only the returned new ID at most once, preserving compact partial state | Milestone 10 complete and manually verified |
+| `garmin_weekly_running_proposal` | Read, normalized/private | Reuses bounded normalized facts and deterministic rules to return strict proposed sessions without writes | Milestone 11 complete and manually verified |
+| `garmin_preview_weekly_running_plan` | Read-only approval preview | Reuses Milestone 11 and adds exact intended writes, deterministic fingerprint, and an opaque expiring approval token | Milestone 12 complete and manually verified |
+| `garmin_schedule_weekly_running_plan` | One-use confirmation-gated write | False is offline; true revalidates, checks stale calendar state, and sequentially composes only the safe Milestone 10 boundary | Milestone 12 complete and manually verified |
 | `garmin_schedule_workout` | Write | Schedules an existing template and summarizes the result | Partial FR-12; no local date validation or duplicate protection |
 | `garmin_create_scheduled_workout` | Write | Uploads arbitrary Garmin JSON, then schedules it | Partial FR-11/FR-13; no internal schema, validation, rollback, or duplicate protection |
 | `garmin_unschedule_workout` | Write/destructive | Removes a calendar assignment by scheduled-workout ID | Basic FR-14 behavior exists |

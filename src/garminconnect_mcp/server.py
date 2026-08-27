@@ -32,6 +32,7 @@ from .training import (
     compare_week_summaries,
     summarize_running_weeks,
 )
+from .weekly_scheduler import ApprovalStore, WeeklyPlanSchedulingService
 from .workout_builder import (
     WorkoutDefinition,
     aggregate_workout,
@@ -39,6 +40,7 @@ from .workout_builder import (
 )
 
 mcp = FastMCP("Garmin Connect")
+_weekly_approval_store = ApprovalStore()
 
 
 def _forbid_unknown_tool_arguments(tool_name: str) -> None:
@@ -138,6 +140,15 @@ def _weekly_proposal_service() -> WeeklyProposalService:
         _recovery_provider,
         _workout_provider,
         _heart_rate_zone_provider,
+    )
+
+
+def _weekly_scheduling_service() -> WeeklyPlanSchedulingService:
+    return WeeklyPlanSchedulingService(
+        _weekly_proposal_service,
+        _workout_provider,
+        _workout_provider,
+        _weekly_approval_store,
     )
 
 
@@ -478,6 +489,51 @@ def garmin_weekly_running_proposal(
 
 
 _forbid_unknown_tool_arguments("garmin_weekly_running_proposal")
+
+
+@mcp.tool()
+def garmin_preview_weekly_running_plan(
+    week_start: StrictStr, constraints: ProposalConstraints
+) -> dict[str, Any]:
+    """Preview one approval-bound Monday-Sunday running plan, without writes.
+
+    This reuses the Milestone 11 normalized reads, constraints, and deterministic
+    planner. It returns the exact proposed WorkoutDefinitions, aggregates,
+    ordered intended writes, a deterministic fingerprint, and an opaque expiring
+    approval token. It creates no workout and makes no calendar change.
+    """
+    monday, normalized = validate_proposal_request(week_start, constraints)
+    return _weekly_scheduling_service().preview(monday.isoformat(), normalized)
+
+
+_forbid_unknown_tool_arguments("garmin_preview_weekly_running_plan")
+
+
+@mcp.tool()
+def garmin_schedule_weekly_running_plan(
+    approval_token: StrictStr,
+    proposal_fingerprint: StrictStr,
+    confirmed: StrictBool = False,
+) -> dict[str, Any]:
+    """Schedule one exact reviewed weekly proposal, at most once.
+
+    The default confirmed=false is fully offline and performs no Garmin client,
+    read, creation, scheduling, retry, rollback, cleanup, deletion, modification,
+    unscheduling, cloning, or device-push call. confirmed=true consumes the
+    expiring approval, strictly revalidates every cached WorkoutDefinition and
+    aggregate, rereads only the normalized proposal-week calendar, and stops
+    before writes if it changed. Sessions execute by approved date/order through
+    the existing safe create-and-schedule boundary and stop after any failure or
+    uncertain outcome.
+    """
+    return _weekly_scheduling_service().schedule(
+        approval_token,
+        proposal_fingerprint,
+        confirmed=confirmed,
+    )
+
+
+_forbid_unknown_tool_arguments("garmin_schedule_weekly_running_plan")
 
 
 @mcp.tool()

@@ -566,12 +566,25 @@ Schedule that plan.
 
 ## Requirements
 
-* [ ] Show the final session list.
-* [ ] Validate all sessions before writing.
-* [ ] Create sessions individually.
-* [ ] Schedule each session.
-* [ ] Report successes and failures separately.
-* [ ] Avoid silently retrying destructive operations.
+* [x] Show the final session list, exact intended writes, deterministic
+      fingerprint, and opaque expiring approval token without writing.
+* [x] Validate the complete Milestone 11 request before provider construction
+      and revalidate all session definitions and aggregates before writing.
+* [x] Consume one exact approval, reread the normalized proposal-week calendar,
+      and stop before writes on stale state or a new exact-date conflict.
+* [x] Create sessions individually in deterministic date/order through only the
+      existing strict serializer and safe create-and-schedule provider boundary.
+* [x] Schedule only each newly returned workout ID on its exact approved date.
+* [x] Report compact per-session success, created-unscheduled, failed,
+      uncertain, and not-attempted states without private identifiers.
+* [x] Stop after the first failure or uncertain result and never retry, replay,
+      roll back, clean up, delete, modify, unschedule, clone, or device-push.
+
+Offline implementation and synthetic verification passed. One separately
+authorized exact live preview, one-use confirmed invocation, and manual Garmin
+inspection also passed on 2026-08-27. The user confirmed all expected creations
+and assignments, absence of duplicates, preservation of existing templates and
+calendar items, and no unrelated changes. No private live value is retained.
 
 ---
 

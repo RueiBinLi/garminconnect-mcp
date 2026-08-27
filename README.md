@@ -129,11 +129,17 @@ Normalized read-only activity tools:
 - `garmin_weekly_running_summary(start_date, end_date)`
 - `garmin_compare_running_weeks(current_week_start, previous_week_start)`
 - `garmin_compare_recent_long_runs(end_date, limit=3)`
+- `garmin_weekly_running_proposal(week_start, constraints)`
 
 Normalized read-only workout tools:
 
 - `garmin_workouts(start=0, limit=20, running_only=false)`
 - `garmin_scheduled_workouts(start_date, end_date)`
+
+Weekly plan approval tools (Milestone 12 complete):
+
+- `garmin_preview_weekly_running_plan(week_start, constraints)`
+- `garmin_schedule_weekly_running_plan(approval_token, proposal_fingerprint, confirmed=false)`
 
 Offline pre-write workout tool:
 
@@ -431,6 +437,54 @@ proposed sessions, and aggregates separate, and always reports
 `proposal_only=true`, `created=false`, and `scheduled=false`. This workflow has
 no create, upload, schedule, modify, unschedule, delete, retry, cleanup, or
 device-push path.
+
+## Milestone 12 weekly plan approval and scheduling
+
+Milestone 12 was completed and manually verified on 2026-08-27. After the full
+offline gate passed, one fresh read-only proposal received explicit approval of
+its exact fingerprint and was invoked once. The user confirmed that every
+workout and calendar assignment matched, no duplicates existed, existing items
+were preserved, and no unrelated change occurred. No private live value is
+retained in this repository.
+
+`garmin_preview_weekly_running_plan` reuses the exact Milestone 11 request model,
+normalized facts, configured running Zone 2, scheduled commitments, deterministic
+policy, and strict WorkoutDefinitions. The response adds the exact ordered list
+of intended creations and schedules, a deterministic `sha256:` proposal
+fingerprint, and an opaque approval token. The fingerprint covers all reviewed
+facts, coverage, constraints, commitments, rules, calculations, warnings,
+unavailable inputs, dates, purposes, definitions, steps, targets, units,
+aggregates, and intended writes. Identical input produces an identical
+fingerprint. The token is process-local, expires after 15 minutes, is bounded in
+memory, and is valid for one confirmed invocation. Restarting the server loses
+pending approvals.
+
+The scheduling tool accepts only the opaque token, exact fingerprint, and a
+strict JSON Boolean `confirmed`. It never accepts a proposal, Garmin JSON,
+calendar object, workout ID, scheduled-workout ID, account value, device value,
+URL, or serialized payload. False or omitted confirmation is fully offline and
+does not consume the approval. True confirmation consumes it before execution,
+revalidates every cached definition and aggregate, then rereads only the
+normalized Monday-Sunday calendar. Any calendar change makes the approval stale;
+a newly added commitment on a proposed date is reported as a conflict. Both stop
+before all writes and require a fresh preview. Dates are never moved silently.
+
+Sessions execute in ascending approved date and `execution_order`. For each
+session, the existing safe provider serializes and uploads exactly one new
+workout, performs its duplicate read, and schedules only the newly returned ID
+on the approved date. Processing stops immediately after a known or uncertain
+failure. Successful earlier sessions and a newly created unscheduled workout
+are preserved; later sessions are marked not attempted. There is no retry,
+rollback, cleanup, deletion, modification, unscheduling, cloning, legacy write,
+or device-push path.
+
+Garmin supplies no stable idempotency key for workout creation. The weekly
+operation is sequential, not transactionally atomic, and cannot guarantee
+duplicate prevention after an uncertain creation response. Never replay a used
+approval or retry an uncertain outcome. Inspect Garmin Connect manually and
+generate a new preview before any later action. Public outcomes omit workout and
+schedule identifiers, raw requests/responses, endpoint details, upstream text,
+account/profile fields, URLs, tokens, calendar payloads, and device identifiers.
 
 ## Development
 

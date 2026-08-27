@@ -1,3 +1,114 @@
+# Milestone 12 Weekly Plan Scheduling Verification (Completed)
+
+Milestone 12 completed manual verification on 2026-08-27 after the full offline
+gate passed. One fresh read-only proposal received explicit approval of its
+exact fingerprint and the confirmed operation was invoked once. The compact
+result reported every requested session complete, with no partial failure,
+uncertainty, or remaining session. The user inspected Garmin Connect and
+confirmed that every expected workout and assignment matched, no duplicate
+existed, all existing items were preserved, and no unrelated change occurred.
+No cleanup was performed. No private date, bpm value, proposal value,
+fingerprint, token, workout ID, schedule ID, calendar content, health fact,
+account value, device value, or raw response is retained in this record.
+
+## Required offline gate
+
+Run all of the following before even generating a live preview:
+
+```bash
+scripts/check-private-output.sh
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m compileall -q src
+```
+
+Also initialize the MCP server over stdio and verify all 32 tools are
+discoverable without constructing a Garmin client. With synthetic clients only,
+exercise preview, `confirmed=false`, complete success, first failure, later
+failure, created-but-unscheduled, and uncertain creation/scheduling. Audit the
+complete call trace: one proposal-week stale-state read, followed for each
+successful session by one upload, one exact duplicate read, and at most one
+schedule using only the newly returned workout ID. Confirm no legacy write,
+retry, rollback, cleanup, delete, modify, unschedule, clone, or device-push method
+is reachable.
+
+## Stage 1 — one fresh read-only preview
+
+Obtain a future Monday and the complete Milestone 11 constraints from the user.
+Call `garmin_preview_weekly_running_plan` once. This authorizes normalized reads
+only. Show the complete compact private preview in the active conversation:
+
+- factual training/recovery inputs and coverage;
+- configured running Zone 2 bpm bounds and source;
+- every user constraint and existing scheduled commitment;
+- deterministic rules, calculations, warnings, and unavailable inputs;
+- every proposed date, purpose, WorkoutDefinition, ordered step, target, unit,
+  and aggregate;
+- exact execution order and creation/schedule count;
+- the `sha256:` proposal fingerprint, opaque approval token, and expiry;
+- `preview_only=true`, `created=false`, and `scheduled=false`;
+- the statement that no Garmin change occurred.
+
+Do not copy any exact live value into this file, Git, logs, fixtures, summaries,
+commit messages, or the eventual verification record.
+
+## Stage 2 — exact approval and one invocation
+
+Ask the user to explicitly approve the exact displayed fingerprint and proposal.
+Approval applies to one invocation only. Without that approval, stop. After it,
+call only:
+
+```text
+garmin_schedule_weekly_running_plan(
+  approval_token=<opaque token from that preview>,
+  proposal_fingerprint=<exact approved fingerprint>,
+  confirmed=true
+)
+```
+
+Invoke it once. Never retry. The tool must consume the approval, revalidate all
+definitions and aggregates, reread only the normalized Monday-Sunday calendar,
+and stop before writes if any commitment changed. A newly occupied proposed date
+is a conflict. Never choose another date. An expired, used, mismatched, stale, or
+conflicting approval requires a new preview and new explicit approval.
+
+If execution starts, sessions must run in ascending approved date and execution
+order. Stop after the first failure or uncertain result. Preserve all earlier
+successes and any newly created unscheduled workout. Mark later sessions not
+attempted. Do not retry, roll back, clean up, delete, move, modify, unschedule,
+clone, or push anything to a device.
+
+## Stage 3 — manual Garmin inspection
+
+Report only the compact normalized outcome. Do not expose workout IDs or
+scheduled-workout IDs unless immediate manual recovery strictly requires one.
+For any uncertain result, instruct the user to inspect Garmin Connect before any
+further action and never replay the approval.
+
+Ask the user to verify in Garmin Connect:
+
+- every expected new workout exists exactly once with the reviewed name, steps,
+  targets, units, and aggregates;
+- each is assigned exactly once on its approved date;
+- no duplicate workout or calendar assignment exists;
+- all pre-existing templates and calendar commitments remain unchanged;
+- no unrelated workout, calendar, or device state changed.
+
+Do not automatically clean up the verification workouts. Garmin creation has no
+stable idempotency key; weekly execution is not transactionally atomic and an
+uncertain creation cannot be safely deduplicated.
+
+## After the user confirms success
+
+After confirmation, mark Milestone 12 complete. Rerun every offline check, record only a
+non-private pass/fail summary, report changed files and known limitations, and
+commit the focused changes. Wait for separate explicit authorization before
+pushing to `origin/main`. Do not begin a later milestone.
+
+---
+
 # Milestone 11 Weekly Proposal Verification (Read-only)
 
 Milestone 11 was completed and manually verified on 2026-08-27. No write tool
@@ -48,8 +159,9 @@ four-session proposal passed manual verification. No private date, bpm value,
 health measurement, identifier, calendar content, account value, device value,
 or raw response is retained in this record.
 
-All required checks were rerun after acceptance. Milestone 12 was not started,
-and pushing remains subject to separate explicit authorization.
+All required checks were rerun after acceptance. At the time of this historical
+Milestone 11 record, Milestone 12 had not started, and pushing remained subject
+to separate explicit authorization.
 
 The later naming extension was verified offline: `half_marathon` maps only to
 `HM`, the strict Monday anchor is `W01`, later week numbers are deterministic,

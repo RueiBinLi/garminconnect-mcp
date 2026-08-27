@@ -1418,3 +1418,181 @@ def test_main_login_uses_login_once_and_reports_token_dir(
 def test_main_rejects_unknown_command() -> None:
     with pytest.raises(SystemExit, match=r"garminconnect-mcp \[serve\|login\]"):
         server.main(["unknown"])
+
+
+def test_milestone_12_preview_and_unconfirmed_mcp_boundary(
+    monkeypatch: pytest.MonkeyPatch, fake_client: FakeClient
+) -> None:
+    monkeypatch.setattr(
+        server,
+        "_weekly_approval_store",
+        server.ApprovalStore(token_factory=lambda: "D" * 43),
+    )
+    reviewed = server.garmin_preview_weekly_running_plan(
+        "2030-04-01",
+        server.ProposalConstraints(
+            plan_start_date="2030-03-04",
+            desired_sessions=1,
+            maximum_sessions=1,
+        ),
+    )
+    assert reviewed["preview_only"] is True
+    assert reviewed["created"] is False
+    assert reviewed["scheduled"] is False
+    assert reviewed["approval_token"] == "D" * 43
+    assert [call[0] for call in fake_client.calls] == [
+        "get_activities_by_date",
+        "get_hrv_data_range",
+        "get_scheduled_workouts",
+        "get_heart_rate_zones",
+    ]
+    fake_client.calls.clear()
+
+    result = server.garmin_schedule_weekly_running_plan(
+        reviewed["approval_token"],
+        reviewed["proposal_fingerprint"],
+        confirmed=False,
+    )
+    assert result["preview_only"] is True
+    assert result["created"] is False
+    assert result["scheduled"] is False
+    assert fake_client.calls == []
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "garmin_preview_weekly_running_plan",
+        "garmin_schedule_weekly_running_plan",
+    ],
+)
+def test_milestone_12_tool_schemas_forbid_unknown_fields(tool_name: str) -> None:
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+    assert tool is not None
+    assert tool.parameters["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {
+            "approval_token": ["D" * 43],
+            "proposal_fingerprint": "sha256:" + "0" * 64,
+        },
+        {
+            "approval_token": "https://invalid.example",
+            "proposal_fingerprint": "sha256:" + "0" * 64,
+        },
+        {
+            "approval_token": "D" * 43,
+            "proposal_fingerprint": {"raw": "payload"},
+        },
+        {
+            "approval_token": "D" * 43,
+            "proposal_fingerprint": "sha256:" + "0" * 64,
+            "confirmed": "true",
+        },
+        {
+            "approval_token": "D" * 43,
+            "proposal_fingerprint": "sha256:" + "0" * 64,
+            "workout_id": "123",
+        },
+        {
+            "approval_token": "D" * 43,
+            "proposal_fingerprint": "sha256:" + "0" * 64,
+            "scheduled_workout_id": "456",
+        },
+        {
+            "approval_token": "D" * 43,
+            "proposal_fingerprint": "sha256:" + "0" * 64,
+            "proposal": [{"rawGarminJson": True}],
+        },
+    ],
+)
+def test_milestone_12_schedule_rejects_unsafe_mcp_inputs(
+    fake_client: FakeClient, arguments: dict[str, object]
+) -> None:
+    async def call_tool() -> None:
+        await server.mcp.call_tool("garmin_schedule_weekly_running_plan", arguments)
+
+    with pytest.raises(ToolError):
+        anyio.run(call_tool)
+    assert fake_client.calls == []
+
+
+def test_milestone_12_synthetic_mcp_outcome_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class SyntheticWeeklyService:
+        def preview(self, week_start: str, constraints: object) -> dict[str, object]:
+            calls.append(("preview", week_start, constraints))
+            return {
+                "week_start": week_start,
+                "preview_only": True,
+                "created": False,
+                "scheduled": False,
+            }
+
+        def schedule(
+            self,
+            approval_token: str,
+            proposal_fingerprint: str,
+            *,
+            confirmed: bool,
+        ) -> dict[str, object]:
+            calls.append(("schedule", approval_token, proposal_fingerprint, confirmed))
+            states = {
+                "U": (False, False),
+                "S": (False, False),
+                "P": (True, False),
+                "X": (True, True),
+            }
+            partial_failure, uncertain = states[approval_token[0]]
+            return {
+                "week_start": "2030-04-01",
+                "preview_only": not confirmed,
+                "partial_failure": partial_failure,
+                "uncertain": uncertain,
+            }
+
+    synthetic = SyntheticWeeklyService()
+    monkeypatch.setattr(server, "_weekly_scheduling_service", lambda: synthetic)
+
+    async def call_all() -> list[dict[str, object]]:
+        results: list[dict[str, object]] = []
+        _, result = await server.mcp.call_tool(
+            "garmin_preview_weekly_running_plan",
+            {
+                "week_start": "2030-04-01",
+                "constraints": {"plan_start_date": "2030-03-04"},
+            },
+        )
+        results.append(result)
+        for prefix, confirmed in [("U", False), ("S", True), ("P", True), ("X", True)]:
+            _, result = await server.mcp.call_tool(
+                "garmin_schedule_weekly_running_plan",
+                {
+                    "approval_token": prefix * 43,
+                    "proposal_fingerprint": "sha256:" + prefix.casefold() * 64,
+                    "confirmed": confirmed,
+                },
+            )
+            results.append(result)
+        return results
+
+    results = anyio.run(call_all)
+    assert results[0]["preview_only"] is True
+    assert results[1]["preview_only"] is True
+    assert results[2]["partial_failure"] is False
+    assert results[3]["partial_failure"] is True
+    assert results[3]["uncertain"] is False
+    assert results[4]["uncertain"] is True
+    assert [item[0] for item in calls] == [
+        "preview",
+        "schedule",
+        "schedule",
+        "schedule",
+        "schedule",
+    ]

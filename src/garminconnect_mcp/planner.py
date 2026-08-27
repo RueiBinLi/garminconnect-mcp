@@ -261,6 +261,13 @@ class WeeklyProposalService:
     def propose(
         self, week_start: Any, constraints: ProposalConstraints | dict[str, Any]
     ) -> dict[str, Any]:
+        proposal, _ = self.propose_with_calendar_snapshot(week_start, constraints)
+        return proposal
+
+    def propose_with_calendar_snapshot(
+        self, week_start: Any, constraints: ProposalConstraints | dict[str, Any]
+    ) -> tuple[dict[str, Any], list[NormalizedScheduledWorkout]]:
+        """Return a proposal plus its normalized calendar input for approval use."""
         monday, constraints = validate_proposal_request(week_start, constraints)
         week_end = monday + timedelta(days=6)
         lookback_end = monday - timedelta(days=1)
@@ -278,7 +285,7 @@ class WeeklyProposalService:
         )
         heart_rate_zones = self._heart_rate_zone_reader().running_zones()
         try:
-            return self._build(
+            proposal = self._build(
                 monday,
                 constraints,
                 activities,
@@ -286,6 +293,7 @@ class WeeklyProposalService:
                 scheduled,
                 heart_rate_zones,
             )
+            return proposal, scheduled
         except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
             raise MalformedProposalDataError(
                 "Normalized proposal input was malformed"
