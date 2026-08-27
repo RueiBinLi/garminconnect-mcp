@@ -22,6 +22,24 @@ Strength-training app integration is explicitly out of scope for the initial ver
 
 ---
 
+# Runtime Usage Safety
+
+When the user is using the Garmin MCP for normal training, activity analysis,
+workout planning, or workout scheduling:
+
+- Do not modify repository files.
+- Do not edit configuration files.
+- Do not install or update dependencies.
+- Do not create commits or branches.
+- Do not refactor code.
+- Do not run destructive Git commands.
+- Only invoke existing MCP tools.
+
+Repository changes are allowed only when the user explicitly asks to develop,
+fix, refactor, or extend the MCP server.
+
+---
+
 # Development Model
 
 The repository is developed primarily by Codex.
