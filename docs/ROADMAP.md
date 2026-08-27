@@ -448,7 +448,8 @@ Status: completed and manually verified on 2026-08-27. Exactly one existing test
 workout was scheduled after exact approval and removed after a second approval.
 The template remained intact, no duplicate or unrelated calendar change was
 observed, and no explicit device-push call occurred. Private assignment values
-are intentionally omitted. Milestone 10 has not started.
+are intentionally omitted. At that completion checkpoint, Milestone 10 had not
+started.
 
 ## Manual Verification
 
@@ -482,10 +483,36 @@ User request
 
 ## Requirements
 
-* [ ] Proposal must be visible before write when requested.
-* [ ] Validation occurs before Garmin creation.
-* [ ] Errors are clearly reported.
-* [ ] Avoid accidental duplicate creation.
+* [x] Add a fully offline exact proposal for one strict `WorkoutDefinition` and
+      one strict Garmin calendar date.
+* [x] Require strict explicit confirmation before constructing a client or
+      making any network request.
+* [x] Validate the complete definition, expanded limits, aggregates, date,
+      confirmation, and unknown fields before writing.
+* [x] Upload exactly one serializer-produced workout and schedule only its
+      returned validated ID at most once.
+* [x] Reuse normalized exact-duplicate schedule detection.
+* [x] Guard both upload and scheduling against dependency HTTP-401 replay.
+* [x] Preserve a newly created unscheduled workout after scheduling failure or
+      uncertainty; never retry, roll back, delete, or clean up automatically.
+* [x] Return compact normalized success or partial-failure state only.
+* [x] Add offline synthetic MCP/provider coverage and update documentation.
+* [x] Receive explicit approval for one exact synthetic proposal and invoke the
+      combined tool once.
+* [x] Complete manual Garmin Connect verification.
+* [x] Rerun checks, mark complete, and commit the focused change.
+* [ ] Push to `origin/main` only after explicit authorization.
+
+Status: completed and manually verified on 2026-08-27. The first approved call
+stopped on expired authentication; manual inspection confirmed that no test
+workout existed. After saved-login refresh and a new exact approval, exactly one
+synthetic running workout was created and scheduled on the approved date. Manual
+verification confirmed the template, ordered steps, calendar assignment, lack
+of duplicates or unrelated changes, and normal Garmin device synchronization.
+No automatic retry, rollback, cleanup, unscheduling, deletion, modification, or
+device push occurred. Private identifiers are intentionally omitted. Reliable
+creation deduplication remains unavailable without a stable Garmin idempotency
+key or local database. Milestone 11 has not started.
 
 ---
 

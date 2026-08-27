@@ -1,11 +1,99 @@
+# Completed Milestone 10 Safe Create-and-Schedule Verification
+
+Milestone 10 was completed and manually verified on 2026-08-27. The default
+suite remained offline and the legacy combined write tool was not used.
+
+## Required offline verification before the one write
+
+Run:
+
+```bash
+scripts/check-private-output.sh
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m compileall -q src
+```
+
+Also run the offline stdio initialization/tool-discovery check, both combined
+preview/default-confirmation paths with forbidden client construction, and the
+confirmed path with synthetic fake clients only. Audit pinned `garminconnect
+0.3.11` source and verify one low-level POST in each upload and schedule wrapper,
+no transient wrapper retry, and a fail-closed HTTP-401 replay guard for both
+writes.
+
+Offline acceptance:
+
+- [x] Complete strict validation occurs before client construction.
+- [x] Preview and false/omitted confirmation make no client, network, or write
+      call.
+- [x] Exactly one upload occurs and scheduling receives only its returned ID.
+- [x] The duplicate read prevents another schedule call for an exact assignment.
+- [x] Uncertain or malformed upload stops before scheduling and is never retried.
+- [x] Schedule failure/uncertainty preserves compact partial state and never
+      triggers retry, verification write, rollback, deletion, or cleanup.
+- [x] Authentication, rate-limit, endpoint, unsupported-client, malformed, and
+      uncertain outcomes are secret-safe.
+- [x] Raw Garmin JSON, response data, owner/account metadata, URLs, tokens,
+      device identifiers, unrelated IDs, and calendar payloads are absent.
+- [x] Existing tools, schemas, legacy behavior, and offline tests remain intact.
+
+## Exact proposal and approval boundary
+
+Use a harmless unique name and short time-ended workout. Show the exact
+normalized definition, ordered steps and targets, aggregates and completeness,
+and one future strict `YYYY-MM-DD` date. State that exactly one new workout will
+be created and only that returned workout ID will be scheduled. State that no
+existing workout will be modified or deleted and no automatic retry, rollback,
+cleanup, unscheduling, or device push will occur.
+
+Warn that creation may succeed while scheduling fails, leaving one new
+unscheduled workout. Garmin may later synchronize calendar state to connected
+devices normally. The milestone-start prompt and provision of a date are not
+approval. Wait for explicit approval of the complete dated proposal.
+
+After approval, call only
+`garmin_create_and_schedule_running_workout(..., confirmed=true)` once. Never
+retry an uncertain result. If creation or scheduling is uncertain, stop and
+report only known compact normalized facts; do not repair or clean up.
+
+Manual acceptance:
+
+- [x] Exactly one new workout template exists.
+- [x] Its name, running sport, description, steps, targets, durations, and units
+      match the proposal.
+- [x] Exactly one calendar assignment exists on the approved date.
+- [x] The assignment references the newly created workout.
+- [x] No duplicate workout or assignment exists.
+- [x] No existing workout was modified or deleted.
+- [x] No unrelated calendar item changed.
+- [x] Any device synchronization matches Garmin's normal behavior; the server
+      made no explicit device-push call.
+
+The first explicitly approved invocation stopped on expired authentication. It
+was not retried, and manual inspection confirmed no matching workout existed.
+After the saved login was refreshed, the complete unchanged proposal received a
+new explicit approval. The combined tool was invoked once and returned compact
+success state for one creation and one assignment. The user confirmed every
+manual acceptance item above. No private identifier, raw response, account data,
+or device value is retained in this record.
+
+The test workout was not automatically unscheduled or deleted. All required
+checks were rerun, only non-private acceptance facts were recorded, and the
+focused Milestone 10 change was committed. Pushing still requires explicit
+authorization. Milestone 11 has not started.
+
+---
+
 # Completed Milestone 9 Safe Scheduling and Unscheduling Verification
 
 Milestone 9 was completed and manually verified on 2026-08-27. After all offline
 checks passed, exactly one existing test workout was scheduled following exact
 approval. The user verified the assignment, then separately approved removal of
 only that assignment and verified that the underlying template remained intact.
-No private identifier or calendar value is retained in this record. Milestone 10
-has not started.
+No private identifier or calendar value is retained in this record. At that
+checkpoint, Milestone 10 had not started.
 
 ## Safety boundary
 
@@ -119,8 +207,8 @@ Manual unscheduling acceptance:
 
 Both checklists passed. All required checks were rerun, only non-private
 acceptance facts were recorded, and the focused Milestone 9 change was committed.
-Pushing to `origin/main` still requires explicit authorization. Milestone 10 was
-not started.
+Pushing to `origin/main` still requires explicit authorization. At that
+checkpoint, Milestone 10 had not started.
 
 ---
 

@@ -808,6 +808,179 @@ def test_running_workout_creation_rejects_arbitrary_or_bulk_payloads_before_clie
     assert fake_client.calls == []
 
 
+def synthetic_combined_definition() -> dict[str, object]:
+    return {
+        "name": "MCP TEST M10 Synthetic",
+        "description": "Offline synthetic fixture",
+        "steps": [
+            {
+                "step_type": "warmup",
+                "duration": {"duration_type": "time", "duration_s": 120},
+            },
+            {
+                "step_type": "run",
+                "duration": {"duration_type": "time", "duration_s": 180},
+                "target": {
+                    "target_type": "heart_rate_range",
+                    "minimum_heart_rate_bpm": 120,
+                    "maximum_heart_rate_bpm": 140,
+                },
+            },
+            {
+                "step_type": "cooldown",
+                "duration": {"duration_type": "time", "duration_s": 120},
+            },
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "extra"),
+    [
+        ("garmin_preview_create_and_schedule_running_workout", {}),
+        ("garmin_create_and_schedule_running_workout", {}),
+        ("garmin_create_and_schedule_running_workout", {"confirmed": False}),
+    ],
+)
+def test_combined_preview_and_unconfirmed_are_fully_offline(
+    monkeypatch: pytest.MonkeyPatch, tool_name: str, extra: dict[str, object]
+) -> None:
+    constructions = 0
+
+    def forbidden_client() -> object:
+        nonlocal constructions
+        constructions += 1
+        raise AssertionError("Garmin client must not be constructed")
+
+    monkeypatch.setattr(server, "_client", forbidden_client)
+
+    async def call_tool() -> object:
+        return await server.mcp.call_tool(
+            tool_name,
+            {
+                "definition": synthetic_combined_definition(),
+                "scheduled_date": "2030-06-15",
+                **extra,
+            },
+        )
+
+    _, result = anyio.run(call_tool)
+
+    assert result["created"] is False
+    assert result["scheduled"] is False
+    assert result["preview_only"] is True
+    assert result["scheduled_date"] == "2030-06-15"
+    assert result["aggregates"]["total_duration_s"] == 420.0
+    assert [step["order"] for step in result["expanded_steps"]] == [1, 2, 3]
+    assert constructions == 0
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "garmin_preview_create_and_schedule_running_workout",
+        "garmin_create_and_schedule_running_workout",
+    ],
+)
+def test_combined_tool_schemas_forbid_unknown_fields(tool_name: str) -> None:
+    tool = server.mcp._tool_manager.get_tool(tool_name)
+
+    assert tool is not None
+    assert tool.parameters["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {
+            "definition": [synthetic_combined_definition()],
+            "scheduled_date": "2030-06-15",
+        },
+        {"definition": {"workoutName": "Unsafe"}, "scheduled_date": "2030-06-15"},
+        {
+            "definition": synthetic_combined_definition(),
+            "scheduled_date": ["2030-06-15"],
+        },
+        {"definition": synthetic_combined_definition(), "scheduled_date": "2030-6-15"},
+        {
+            "definition": synthetic_combined_definition(),
+            "scheduled_date": "2030-06-15T00:00:00Z",
+        },
+        {
+            "definition": synthetic_combined_definition(),
+            "scheduled_date": "2030-06-15",
+            "confirmed": "true",
+        },
+        {
+            "definition": synthetic_combined_definition(),
+            "scheduled_date": "2030-06-15",
+            "confirmed": 1,
+        },
+        {
+            "definition": synthetic_combined_definition(),
+            "scheduled_date": "2030-06-15",
+            "workout_id": "456",
+        },
+        {
+            "definition": synthetic_combined_definition(),
+            "scheduled_date": "2030-06-15",
+            "url": "https://private.invalid",
+        },
+    ],
+)
+def test_combined_rejects_unsafe_mcp_input_before_client(
+    fake_client: FakeClient, arguments: dict[str, object]
+) -> None:
+    async def call_invalid() -> None:
+        await server.mcp.call_tool(
+            "garmin_create_and_schedule_running_workout", arguments
+        )
+
+    with pytest.raises(ToolError):
+        anyio.run(call_invalid)
+
+    assert fake_client.calls == []
+
+
+def test_confirmed_combined_mcp_call_uploads_once_and_schedules_returned_id(
+    fake_client: FakeClient,
+) -> None:
+    async def call_confirmed() -> object:
+        return await server.mcp.call_tool(
+            "garmin_create_and_schedule_running_workout",
+            {
+                "definition": synthetic_combined_definition(),
+                "scheduled_date": "2026-05-25",
+                "confirmed": True,
+            },
+        )
+
+    _, result = anyio.run(call_confirmed)
+
+    assert result == {
+        "created": True,
+        "workout_id": "456",
+        "scheduled": True,
+        "already_scheduled": False,
+        "scheduled_workout_id": "789",
+        "scheduled_date": "2026-05-25",
+        "name": "MCP TEST M10 Synthetic",
+        "sport_type": "running",
+        "total_duration_s": 420.0,
+        "total_distance_m": None,
+        "partial_failure": False,
+        "message": (
+            "Exactly one new workout was created and scheduled in Garmin Connect."
+        ),
+    }
+    assert [call[0] for call in fake_client.calls] == [
+        "upload_workout",
+        "get_scheduled_workouts",
+        "schedule_workout",
+    ]
+    assert fake_client.calls[-1][1][0] == "456"
+
+
 def test_schedule_preview_is_offline_and_compact(fake_client: FakeClient) -> None:
     assert server.garmin_preview_workout_schedule("456", "2026-05-25") == {
         "scheduled": False,

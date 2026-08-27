@@ -149,7 +149,12 @@ Safe existing-workout calendar tools (Milestone 9 complete):
 - `garmin_schedule_existing_workout(workout_id, scheduled_date, confirmed=false)`
 - `garmin_unschedule_existing_workout(scheduled_workout_id, confirmed=false)`
 
-Legacy workout write tools (behavior preserved; do not use for Milestone 9):
+Safe combined creation and scheduling tools (Milestone 10 complete):
+
+- `garmin_preview_create_and_schedule_running_workout(definition, scheduled_date)`
+- `garmin_create_and_schedule_running_workout(definition, scheduled_date, confirmed=false)`
+
+Legacy workout write tools (behavior preserved; do not use for Milestones 9–10):
 
 - `garmin_schedule_workout`
 - `garmin_create_scheduled_workout`
@@ -337,6 +342,36 @@ then removed only after a second exact approval. The template remained intact,
 no duplicate or unrelated calendar change occurred, and no device-push method
 was called. Private assignment values are intentionally absent from this record.
 See [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
+
+Milestone 10 composes the strict creation and duplicate-aware scheduling
+boundaries for exactly one new workout and one calendar date. Its preview and
+false/omitted confirmation paths are fully offline and expose only the normalized
+definition, expanded execution order, aggregates, date, no-write state, and
+device-synchronization warning. Arrays, raw Garmin JSON, pre-existing workout
+IDs, timestamps, coercible values, and unknown fields are rejected before client
+construction.
+
+A confirmed call performs one guarded upload, validates one returned workout ID,
+then uses only that ID for the existing normalized exact-duplicate read and at
+most one guarded scheduling call. Upload and schedule both block the pinned
+dependency's HTTP-401 replay path. No automatic retry, rollback, cleanup,
+unscheduling, deletion, modification, cloning, or direct device push is present.
+If scheduling fails after creation, the compact result reports
+`partial_failure=true` and preserves the new unscheduled workout.
+
+Garmin provides no stable idempotency key for workout creation and this project
+has no database, so duplicate creation cannot be guaranteed after an uncertain
+upload. Never retry an uncertain creation. Inspect Garmin Connect manually before
+proposing any further action.
+
+Milestone 10 was completed and manually verified on 2026-08-27. After the first
+approved invocation stopped on expired authentication, manual inspection found
+no created test workout. The saved login was refreshed, the exact proposal was
+approved again, and one new synthetic running workout was created and scheduled
+successfully on the approved date. Manual verification confirmed the template,
+steps, assignment, lack of duplicates, unchanged existing workouts/calendar
+items, and normal device synchronization behavior. No private IDs or raw Garmin
+data are retained. The test workout was not automatically unscheduled or deleted.
 
 ## Development
 

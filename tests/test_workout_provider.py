@@ -56,6 +56,7 @@ class SyntheticClient:
         schedule_response: Any = None,
         scheduled_lookup_response: Any = None,
         error: Exception | None = None,
+        upload_error: Exception | None = None,
         write_error: Exception | None = None,
     ) -> None:
         self.saved_response = [] if saved_response is None else saved_response
@@ -93,11 +94,14 @@ class SyntheticClient:
             else scheduled_lookup_response
         )
         self.error = error
+        self.upload_error = upload_error
         self.write_error = write_error
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
     def upload_workout(self, workout_json: object) -> Any:
         self.calls.append(("upload_workout", (workout_json,)))
+        if self.upload_error is not None:
+            raise self.upload_error
         self._raise()
         return self.upload_response
 
@@ -147,9 +151,12 @@ def test_installed_write_wrappers_match_audited_single_call_source() -> None:
 
     schedule_source = inspect.getsource(Garmin.schedule_workout)
     unschedule_source = inspect.getsource(Garmin.unschedule_workout)
+    upload_source = inspect.getsource(Garmin.upload_workout)
 
+    assert upload_source.count("self.client.post(") == 1
     assert schedule_source.count("self.client.post(") == 1
     assert unschedule_source.count("self.client.delete(") == 1
+    assert "connectapi(" not in upload_source
     assert "connectapi(" not in schedule_source
     assert "connectapi(" not in unschedule_source
 
@@ -256,6 +263,274 @@ def test_create_running_workout_maps_missing_upload_support_safely() -> None:
         GarminWorkoutProvider(lambda: UnsupportedClient()).create_running_workout(
             creation_definition()
         )
+
+
+def test_combined_workflow_uploads_once_then_schedules_only_returned_id() -> None:
+    client = SyntheticClient()
+
+    result = provider(client).create_and_schedule_running_workout(
+        creation_definition(), "2030-06-15"
+    )
+
+    assert result == {
+        "created": True,
+        "workout_id": "8100000099",
+        "scheduled": True,
+        "already_scheduled": False,
+        "scheduled_workout_id": "8300000099",
+        "scheduled_date": "2030-06-15",
+        "name": "Synthetic Creation Fixture",
+        "sport_type": "running",
+        "total_duration_s": 600.0,
+        "total_distance_m": None,
+        "partial_failure": False,
+        "message": (
+            "Exactly one new workout was created and scheduled in Garmin Connect."
+        ),
+    }
+    assert client.calls == [
+        ("upload_workout", (serialize_running_workout(creation_definition()),)),
+        ("get_scheduled_workouts", (2030, 6)),
+        ("schedule_workout", ("8100000099", "2030-06-15")),
+    ]
+    rendered = repr(result).casefold()
+    assert "owner" not in rendered
+    assert "url" not in rendered
+    assert "private" not in rendered
+
+
+def test_combined_workflow_validates_date_before_client_construction() -> None:
+    constructions = 0
+
+    def factory() -> SyntheticClient:
+        nonlocal constructions
+        constructions += 1
+        return SyntheticClient()
+
+    with pytest.raises(InvalidWorkoutRequestError):
+        GarminWorkoutProvider(factory).create_and_schedule_running_workout(
+            creation_definition(), "2030-6-15"
+        )
+
+    assert constructions == 0
+
+
+@pytest.mark.parametrize("response", [{}, {"workoutId": True}, {"workoutId": "0"}])
+def test_combined_malformed_upload_stops_before_schedule(response: object) -> None:
+    client = SyntheticClient(upload_response=response)
+
+    with pytest.raises(WorkoutResponseError):
+        provider(client).create_and_schedule_running_workout(
+            creation_definition(), "2030-06-15"
+        )
+
+    assert [call[0] for call in client.calls] == ["upload_workout"]
+
+
+def test_combined_uncertain_upload_stops_without_retry_or_schedule() -> None:
+    client = SyntheticClient(
+        upload_error=GarminConnectConnectionError("private uncertain upload")
+    )
+
+    with pytest.raises(WorkoutUncertainResultError, match="uncertain") as raised:
+        provider(client).create_and_schedule_running_workout(
+            creation_definition(), "2030-06-15"
+        )
+
+    assert "private" not in str(raised.value)
+    assert [call[0] for call in client.calls] == ["upload_workout"]
+
+
+@pytest.mark.parametrize(
+    ("upstream_error", "expected_error", "message"),
+    [
+        (
+            GarminConnectAuthenticationError("private upload auth"),
+            WorkoutAuthenticationError,
+            "authentication failed",
+        ),
+        (
+            GarminConnectTooManyRequestsError("private upload rate"),
+            WorkoutEndpointError,
+            "rate limit",
+        ),
+        (
+            GarminConnectNotFoundError("private upload endpoint"),
+            WorkoutEndpointError,
+            "endpoint failed",
+        ),
+        (
+            GarminConnectConnectionError("private upload uncertain"),
+            WorkoutUncertainResultError,
+            "uncertain",
+        ),
+    ],
+)
+def test_combined_upload_errors_are_secret_safe_and_never_retried(
+    upstream_error: Exception,
+    expected_error: type[Exception],
+    message: str,
+) -> None:
+    client = SyntheticClient(upload_error=upstream_error)
+
+    with pytest.raises(expected_error, match=message) as raised:
+        provider(client).create_and_schedule_running_workout(
+            creation_definition(), "2030-06-15"
+        )
+
+    assert "private" not in str(raised.value)
+    assert [call[0] for call in client.calls] == ["upload_workout"]
+
+
+def test_combined_unsupported_upload_stops_before_schedule() -> None:
+    class UnsupportedClient:
+        pass
+
+    with pytest.raises(WorkoutUnsupportedError, match="does not support"):
+        GarminWorkoutProvider(
+            lambda: UnsupportedClient()  # type: ignore[arg-type]
+        ).create_and_schedule_running_workout(creation_definition(), "2030-06-15")
+
+
+def test_combined_schedule_failure_preserves_compact_partial_state() -> None:
+    client = SyntheticClient(
+        write_error=GarminConnectConnectionError("private uncertain schedule")
+    )
+
+    result = provider(client).create_and_schedule_running_workout(
+        creation_definition(), "2030-06-15"
+    )
+
+    assert result["created"] is True
+    assert result["workout_id"] == "8100000099"
+    assert result["scheduled"] is False
+    assert result["already_scheduled"] is False
+    assert result["scheduled_workout_id"] is None
+    assert result["partial_failure"] is True
+    assert "scheduling is uncertain" in result["message"]
+    assert "private" not in repr(result).casefold()
+    assert [call[0] for call in client.calls] == [
+        "upload_workout",
+        "get_scheduled_workouts",
+        "schedule_workout",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("schedule_error", "message"),
+    [
+        (
+            GarminConnectAuthenticationError("private schedule auth"),
+            "authentication expired",
+        ),
+        (
+            GarminConnectTooManyRequestsError("private schedule rate"),
+            "rate limit",
+        ),
+        (
+            GarminConnectNotFoundError("private schedule endpoint"),
+            "endpoint failed",
+        ),
+    ],
+)
+def test_combined_duplicate_read_failure_returns_secret_safe_partial_result(
+    schedule_error: Exception, message: str
+) -> None:
+    class ReadFailureAfterUploadClient(SyntheticClient):
+        def upload_workout(self, workout_json: object) -> Any:
+            result = super().upload_workout(workout_json)
+            self.error = schedule_error
+            return result
+
+    client = ReadFailureAfterUploadClient()
+
+    result = provider(client).create_and_schedule_running_workout(
+        creation_definition(), "2030-06-15"
+    )
+
+    assert result["created"] is True
+    assert result["partial_failure"] is True
+    assert message in result["message"]
+    assert "private" not in repr(result).casefold()
+    assert [call[0] for call in client.calls] == [
+        "upload_workout",
+        "get_scheduled_workouts",
+    ]
+
+
+def test_combined_malformed_schedule_response_is_uncertain_partial_state() -> None:
+    client = SyntheticClient(schedule_response={})
+
+    result = provider(client).create_and_schedule_running_workout(
+        creation_definition(), "2030-06-15"
+    )
+
+    assert result["created"] is True
+    assert result["scheduled"] is False
+    assert result["scheduled_workout_id"] is None
+    assert result["partial_failure"] is True
+    assert "scheduling is uncertain" in result["message"]
+    assert [call[0] for call in client.calls] == [
+        "upload_workout",
+        "get_scheduled_workouts",
+        "schedule_workout",
+    ]
+
+
+def test_combined_exact_duplicate_skips_schedule_write() -> None:
+    client = SyntheticClient(
+        monthly_responses={
+            (2030, 6): {
+                "scheduledWorkouts": [scheduled(8300000099, 8100000099, "2030-06-15")]
+            }
+        }
+    )
+
+    result = provider(client).create_and_schedule_running_workout(
+        creation_definition(), "2030-06-15"
+    )
+
+    assert result["created"] is True
+    assert result["scheduled"] is False
+    assert result["already_scheduled"] is True
+    assert result["scheduled_workout_id"] == "8300000099"
+    assert result["partial_failure"] is False
+    assert [call[0] for call in client.calls] == [
+        "upload_workout",
+        "get_scheduled_workouts",
+    ]
+
+
+def test_combined_upload_blocks_dependency_auth_replay() -> None:
+    class ReplayTransport:
+        def __init__(self) -> None:
+            self.http_attempts = 0
+            self.refreshes = 0
+
+        def _refresh_session(self) -> None:
+            self.refreshes += 1
+
+    class ReplayClient:
+        def __init__(self) -> None:
+            self.client = ReplayTransport()
+
+        def upload_workout(self, workout_json: object) -> object:
+            self.client.http_attempts += 1
+            self.client._refresh_session()
+            self.client.http_attempts += 1
+            return {}
+
+    client = ReplayClient()
+
+    with pytest.raises(WorkoutAuthenticationError, match="authentication failed"):
+        GarminWorkoutProvider(
+            lambda: client  # type: ignore[arg-type]
+        ).create_and_schedule_running_workout(creation_definition(), "2030-06-15")
+
+    assert client.client.http_attempts == 1
+    assert client.client.refreshes == 0
+    client.client._refresh_session()
+    assert client.client.refreshes == 1
 
 
 def test_saved_workouts_has_bounded_pagination_and_ui_order() -> None:

@@ -403,23 +403,17 @@ class GarminWorkoutProvider:
         payload = serialize_running_workout(definition)
 
         def upload(client: GarminClient) -> Any:
-            upload_workout = getattr(client, "upload_workout", None)
-            if not callable(upload_workout):
-                raise WorkoutUnsupportedError(
+            return self._invoke_write_method_once(
+                client,
+                "upload_workout",
+                payload,
+                unsupported_message=(
                     "Installed Garmin client does not support workout creation"
-                )
-            return upload_workout(payload)
+                ),
+            )
 
         raw = self._call("workout creation", upload)
-        try:
-            normalized = normalize_workout(raw)
-        except MalformedWorkoutResponseError as exc:
-            raise WorkoutResponseError(str(exc)) from exc
-        workout_id = normalized["workout_id"]
-        if workout_id is None:
-            raise WorkoutResponseError(
-                "Garmin workout creation response did not include a workout ID"
-            )
+        workout_id = self._created_workout_id(raw, require_valid_identifier=False)
         aggregates = aggregate_workout(definition)
         return {
             "created": True,
@@ -431,6 +425,103 @@ class GarminWorkoutProvider:
             "scheduled": False,
             "message": "Workout created in Garmin Connect but not scheduled.",
         }
+
+    def create_and_schedule_running_workout(
+        self, definition: WorkoutDefinition, scheduled_date: str
+    ) -> dict[str, Any]:
+        """Create one validated workout, then schedule only its returned ID."""
+        scheduled_date = self._date(scheduled_date, name="scheduled_date")
+        payload = serialize_running_workout(definition)
+        aggregates = aggregate_workout(definition)
+
+        def upload(client: GarminClient) -> Any:
+            return self._invoke_write_method_once(
+                client,
+                "upload_workout",
+                payload,
+                unsupported_message=(
+                    "Installed Garmin client does not support workout creation"
+                ),
+            )
+
+        raw = self._write_once("workout creation", upload)
+        workout_id = self._created_workout_id(raw, require_valid_identifier=True)
+
+        base = {
+            "created": True,
+            "workout_id": workout_id,
+            "scheduled": False,
+            "already_scheduled": False,
+            "scheduled_workout_id": None,
+            "scheduled_date": scheduled_date,
+            "name": definition.name,
+            "sport_type": definition.sport_type,
+            "total_duration_s": aggregates["total_duration_s"],
+            "total_distance_m": aggregates["total_distance_m"],
+        }
+        try:
+            schedule = self.schedule_existing_workout(workout_id, scheduled_date)
+        except WorkoutProviderError as exc:
+            return {
+                **base,
+                "partial_failure": True,
+                "message": self._partial_schedule_failure_message(exc),
+            }
+
+        return {
+            **base,
+            "scheduled": schedule["scheduled"],
+            "already_scheduled": schedule["already_scheduled"],
+            "scheduled_workout_id": schedule["scheduled_workout_id"],
+            "partial_failure": False,
+            "message": (
+                "Exactly one new workout was created and scheduled in Garmin Connect."
+                if schedule["scheduled"]
+                else "The new workout was created and was already assigned to the "
+                "requested date; no additional schedule write occurred."
+            ),
+        }
+
+    def _created_workout_id(self, raw: Any, *, require_valid_identifier: bool) -> str:
+        try:
+            normalized = normalize_workout(raw)
+        except MalformedWorkoutResponseError as exc:
+            raise WorkoutResponseError(str(exc)) from exc
+        workout_id = normalized["workout_id"]
+        if workout_id is None:
+            raise WorkoutResponseError(
+                "Garmin workout creation response did not include a workout ID"
+            )
+        if require_valid_identifier:
+            return self._identifier(workout_id, name="workout_id", response=True)
+        return workout_id
+
+    @staticmethod
+    def _partial_schedule_failure_message(exc: WorkoutProviderError) -> str:
+        if isinstance(exc, WorkoutUncertainResultError):
+            return (
+                "Workout creation succeeded, but scheduling is uncertain. The new "
+                "workout was preserved; inspect Garmin Connect before any further "
+                "action."
+            )
+        if isinstance(exc, WorkoutAuthenticationError):
+            reason = "Garmin authentication expired before scheduling"
+        elif isinstance(exc, WorkoutUnsupportedError):
+            reason = "the installed Garmin client cannot schedule workouts safely"
+        elif isinstance(exc, WorkoutResponseError):
+            reason = "Garmin returned a malformed scheduling response"
+        elif isinstance(exc, WorkoutEndpointError):
+            reason = (
+                "the Garmin scheduling rate limit was reached"
+                if "rate limit" in str(exc)
+                else "the Garmin scheduling endpoint failed"
+            )
+        else:  # pragma: no cover - all current provider errors are covered above
+            reason = "scheduling failed"
+        return (
+            f"Workout creation succeeded, but {reason}. The new unscheduled "
+            "workout was preserved; no retry or cleanup occurred."
+        )
 
     def schedule_existing_workout(
         self, workout_id: str, scheduled_date: str

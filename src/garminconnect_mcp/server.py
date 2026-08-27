@@ -523,6 +523,75 @@ def garmin_create_running_workout(
     return _workout_provider().create_running_workout(definition)
 
 
+def _combined_workout_preview(
+    definition: WorkoutDefinition, scheduled_date: Any
+) -> dict[str, Any]:
+    scheduled_date = validate_workout_date(scheduled_date, name="scheduled_date")
+    preview = preview_running_workout(definition)
+    return {
+        "definition": preview["definition"],
+        "expanded_steps": preview["expanded_steps"],
+        "aggregates": preview["aggregates"],
+        "scheduled_date": scheduled_date,
+        "created": False,
+        "scheduled": False,
+        "preview_only": True,
+        "message": "Preview only: no Garmin workout or calendar change occurred.",
+        "device_sync_warning": (
+            "Garmin may later synchronize scheduled calendar state to connected "
+            "devices; this server will not call a device-push method."
+        ),
+    }
+
+
+@mcp.tool()
+def garmin_preview_create_and_schedule_running_workout(
+    definition: WorkoutDefinition, scheduled_date: StrictStr
+) -> dict[str, Any]:
+    """Preview one validated running-workout creation and date entirely offline.
+
+    The definition uses the strict public WorkoutDefinition with explicit units,
+    and scheduled_date must be exactly YYYY-MM-DD. The result shows normalized
+    execution order and aggregates only. No Garmin client, network, creation,
+    scheduling, calendar, cleanup, or device-push call is made.
+    """
+    if not isinstance(definition, WorkoutDefinition):
+        definition = WorkoutDefinition.model_validate(definition, strict=True)
+    return _combined_workout_preview(definition, scheduled_date)
+
+
+_forbid_unknown_tool_arguments("garmin_preview_create_and_schedule_running_workout")
+
+
+@mcp.tool()
+def garmin_create_and_schedule_running_workout(
+    definition: WorkoutDefinition,
+    scheduled_date: StrictStr,
+    confirmed: StrictBool = False,
+) -> dict[str, Any]:
+    """Create one new running workout and schedule only that new workout once.
+
+    The default confirmed=false is fully offline. Set confirmed=true only after
+    approving the exact preview. A confirmed call uploads exactly one serializer-
+    produced workout, uses only its returned ID for an exact duplicate read, and
+    schedules at most once. It never retries, rolls back, cleans up, unschedules,
+    deletes, modifies, clones, or directly pushes to a device.
+    """
+    if not isinstance(definition, WorkoutDefinition):
+        definition = WorkoutDefinition.model_validate(definition, strict=True)
+    preview = _combined_workout_preview(definition, scheduled_date)
+    if not isinstance(confirmed, bool):
+        raise InvalidWorkoutRequestError("confirmed must be a boolean")
+    if not confirmed:
+        return preview
+    return _workout_provider().create_and_schedule_running_workout(
+        definition, scheduled_date
+    )
+
+
+_forbid_unknown_tool_arguments("garmin_create_and_schedule_running_workout")
+
+
 def _schedule_preview(workout_id: Any, scheduled_date: Any) -> dict[str, Any]:
     workout_id = validate_workout_identifier(workout_id, name="workout_id")
     scheduled_date = validate_workout_date(scheduled_date, name="scheduled_date")
