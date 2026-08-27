@@ -22,6 +22,30 @@ class NormalizedActivity(TypedDict):
     elevation_gain_m: float | None
 
 
+class ActivitySplit(TypedDict):
+    """One Garmin-recorded lap with explicit public units."""
+
+    split_index: int
+    start_time_local: str | None
+    distance_m: float | None
+    duration_s: float | None
+    moving_duration_s: float | None
+    elapsed_duration_s: float | None
+    pace_s_per_km: float | None
+    average_heart_rate_bpm: float | None
+    maximum_heart_rate_bpm: float | None
+    average_cadence_spm: float | None
+    elevation_gain_m: float | None
+    elevation_loss_m: float | None
+    intensity_type: str | None
+
+
+class NormalizedActivitySplits(TypedDict):
+    activity_id: str
+    split_type: str
+    splits: list[ActivitySplit]
+
+
 class MalformedActivityResponseError(RuntimeError):
     """Raised when Garmin returns an unexpected activity response shape."""
 
@@ -157,6 +181,66 @@ def normalize_activity(raw: Any) -> NormalizedActivity:
             _from_layers(layers, ("elevationGain", "gainElevation"))
         ),
     }
+
+
+def _positive_number(value: Any) -> float | None:
+    number = _number(value)
+    return number if number is not None and number > 0 else None
+
+
+def normalize_activity_splits(
+    raw: Any, *, activity_id: str
+) -> NormalizedActivitySplits:
+    """Normalize Garmin-recorded laps without retaining their raw payloads.
+
+    Pace is derived only from Garmin's supplied ``averageMovingSpeed`` in
+    meters per second. It is not reconstructed from lap distance and duration.
+    """
+    if not isinstance(raw, dict) or not raw:
+        raise MalformedActivityResponseError(
+            "Garmin returned a malformed activity-splits response"
+        )
+    raw_laps = raw.get("lapDTOs")
+    if not isinstance(raw_laps, list) or not raw_laps:
+        raise MalformedActivityResponseError(
+            "Garmin returned no recorded activity laps"
+        )
+    if any(not isinstance(lap, dict) for lap in raw_laps):
+        raise MalformedActivityResponseError(
+            "Garmin returned malformed recorded activity laps"
+        )
+
+    splits: list[ActivitySplit] = []
+    for position, lap in enumerate(raw_laps, start=1):
+        raw_index = lap.get("lapIndex")
+        split_index = (
+            raw_index
+            if isinstance(raw_index, int)
+            and not isinstance(raw_index, bool)
+            and raw_index > 0
+            else position
+        )
+        splits.append(
+            {
+                "split_index": split_index,
+                "start_time_local": _text(lap.get("startTimeLocal")),
+                "distance_m": _number(lap.get("distance")),
+                "duration_s": _number(lap.get("duration")),
+                "moving_duration_s": _number(lap.get("movingDuration")),
+                "elapsed_duration_s": _number(lap.get("elapsedDuration")),
+                "pace_s_per_km": _pace_from_speed(
+                    _positive_number(lap.get("averageMovingSpeed"))
+                ),
+                "average_heart_rate_bpm": _number(lap.get("averageHR")),
+                "maximum_heart_rate_bpm": _number(lap.get("maxHR")),
+                "average_cadence_spm": _number(lap.get("averageRunCadence")),
+                "elevation_gain_m": _number(lap.get("elevationGain")),
+                "elevation_loss_m": _number(lap.get("elevationLoss")),
+                "intensity_type": _text(lap.get("intensityType")),
+            }
+        )
+
+    return {"activity_id": activity_id, "split_type": "lap", "splits": splits}
 
 
 def activity_is_running(activity: NormalizedActivity) -> bool:

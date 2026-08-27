@@ -43,6 +43,26 @@ class SyntheticClient:
         self.calls.append(("get_activity", (activity_id,), {}))
         return self._result()
 
+    def get_activity_splits(self, activity_id: str) -> Any:
+        self.calls.append(("get_activity_splits", (activity_id,), {}))
+        return self._result()
+
+    def get_activity_typed_splits(self, activity_id: str) -> Any:
+        self.calls.append(("get_activity_typed_splits", (activity_id,), {}))
+        return self._result()
+
+    def get_activity_details(
+        self, activity_id: str, maxchart: int = 2000, maxpoly: int = 4000
+    ) -> Any:
+        self.calls.append(
+            (
+                "get_activity_details",
+                (activity_id,),
+                {"maxchart": maxchart, "maxpoly": maxpoly},
+            )
+        )
+        return self._result()
+
     def get_activities_by_date(
         self,
         startdate: str,
@@ -116,6 +136,40 @@ def test_activity_retrieves_one_normalized_summary() -> None:
     assert result["activity_id"] == "9000000012"
     assert result["distance_m"] == 6000.0
     assert client.calls == [("get_activity", ("9000000012",), {})]
+
+
+def test_activity_splits_returns_only_normalized_recorded_laps() -> None:
+    client = SyntheticClient(
+        response={
+            "activityId": 9000000017,
+            "lapDTOs": [
+                {
+                    "lapIndex": 1,
+                    "distance": 1000,
+                    "averageMovingSpeed": 3.2,
+                    "private": "discarded",
+                }
+            ],
+        }
+    )
+
+    result = provider(client).activity_splits(" 9000000017 ")
+
+    assert result["activity_id"] == "9000000017"
+    assert result["split_type"] == "lap"
+    assert result["splits"][0]["distance_m"] == 1000.0
+    assert "private" not in result["splits"][0]
+    assert client.calls == [("get_activity_splits", ("9000000017",), {})]
+
+
+@pytest.mark.parametrize("mode", ["kilometers", "mile", "LAPS", ""])
+def test_activity_splits_rejects_unsupported_mode_before_call(mode: str) -> None:
+    client = SyntheticClient(response={"lapDTOs": []})
+
+    with pytest.raises(InvalidActivityRequestError, match="mode"):
+        provider(client).activity_splits("9000000017", mode=mode)
+
+    assert client.calls == []
 
 
 @pytest.mark.parametrize("activity_id", ["", "abc", "0", "-1"])
@@ -224,3 +278,58 @@ def test_running_activities_by_date_rejects_invalid_ranges(
         provider(client).running_activities_by_date(start_date, end_date)
 
     assert client.calls == []
+
+
+def test_aerobic_drift_uses_bounded_details_and_read_only_evidence() -> None:
+    class DriftClient(SyntheticClient):
+        def get_activity_details(
+            self, activity_id: str, maxchart: int = 2000, maxpoly: int = 4000
+        ) -> Any:
+            self.calls.append(
+                (
+                    "get_activity_details",
+                    (activity_id,),
+                    {"maxchart": maxchart, "maxpoly": maxpoly},
+                )
+            )
+            return {
+                "metricDescriptors": [
+                    {"key": key, "metricsIndex": index}
+                    for index, key in enumerate(
+                        (
+                            "directTimestamp",
+                            "sumDistance",
+                            "directSpeed",
+                            "directHeartRate",
+                        )
+                    )
+                ],
+                "activityDetailMetrics": [
+                    {"metrics": [index * 60, index * 180, 3.0, 150.0]}
+                    for index in range(21)
+                ],
+            }
+
+        def get_activity_splits(self, activity_id: str) -> Any:
+            self.calls.append(("get_activity_splits", (activity_id,), {}))
+            return {"activityId": activity_id, "lapDTOs": []}
+
+        def get_activity_typed_splits(self, activity_id: str) -> Any:
+            self.calls.append(("get_activity_typed_splits", (activity_id,), {}))
+            return {"activityId": activity_id, "splits": []}
+
+    client = DriftClient()
+
+    result = provider(client).aerobic_drift("9000000018")
+
+    assert result["activity_id"] == "9000000018"
+    assert result["aerobic_decoupling_pct"] == pytest.approx(0)
+    assert client.calls == [
+        (
+            "get_activity_details",
+            ("9000000018",),
+            {"maxchart": 1000, "maxpoly": 0},
+        ),
+        ("get_activity_splits", ("9000000018",), {}),
+        ("get_activity_typed_splits", ("9000000018",), {}),
+    ]

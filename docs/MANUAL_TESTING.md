@@ -1,3 +1,31 @@
+# Recorded Laps and Aerobic Drift (Completed)
+
+Manual verification completed on 2026-08-27 using one real running activity.
+Recorded lap distances, pace, heart rate, cadence, half metrics, drift output,
+and warnings behaved as expected. The activity was not steady enough for a
+reliable steady-state assessment, and the tool correctly returned
+`usable_for_drift_analysis=false` with a half-pace warning while preserving the
+compact factual calculation. Only read-only activity lookup, split, and drift
+operations were used; no Garmin or repository state changed. No private
+activity identifier, date, measurement, or raw response is retained here.
+
+Use one real steady/easy running activity. Invoke only
+`garmin_activity_splits(activity_id, mode="laps")` and
+`garmin_activity_aerobic_drift(activity_id)`; both are read-only.
+
+Compare with Garmin Connect:
+
+- recorded lap count and actual distances, including any partial final lap;
+- lap moving pace, average HR, cadence, and elevation when available;
+- first- and second-half distance, moving duration, pace, and time-weighted HR;
+- aerobic decoupling percentage and sign;
+- warnings and `usable_for_drift_analysis`;
+- no workout, calendar, authentication, token, or other Garmin state changed.
+
+Do not save or paste raw lap or time-series payloads into the repository.
+
+---
+
 # Milestone 12 Weekly Plan Scheduling Verification (Completed)
 
 Milestone 12 completed manual verification on 2026-08-27 after the full offline
@@ -24,7 +52,7 @@ scripts/check-private-output.sh
 .venv/bin/python -m compileall -q src
 ```
 
-Also initialize the MCP server over stdio and verify all 32 tools are
+Also initialize the MCP server over stdio and verify all 34 tools are
 discoverable without constructing a Garmin client. With synthetic clients only,
 exercise preview, `confirmed=false`, complete success, first failure, later
 failure, created-but-unscheduled, and uncertain creation/scheduling. Audit the

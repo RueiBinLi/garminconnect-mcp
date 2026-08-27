@@ -125,6 +125,8 @@ Normalized read-only activity tools:
 
 - `garmin_recent_activities(start=0, limit=10, running_only=false)`
 - `garmin_activity(activity_id)`
+- `garmin_activity_splits(activity_id, mode="laps")`
+- `garmin_activity_aerobic_drift(activity_id)`
 - `garmin_running_activities_by_date(start_date, end_date)`
 - `garmin_weekly_running_summary(start_date, end_date)`
 - `garmin_compare_running_weeks(current_week_start, previous_week_start)`
@@ -185,6 +187,30 @@ Activity responses are normalized behind a Garmin provider boundary and never
 return raw chart, polyline, owner, profile-image, role, or privacy metadata.
 Invalid pagination, unknown IDs, malformed responses, authentication failures,
 rate limits, and endpoint failures produce bounded, secret-safe errors.
+
+`garmin_activity_splits` returns Garmin-recorded laps, preserving each actual
+distance, including a partial final lap. Recorded laps are not guaranteed to be
+kilometers; only `mode="laps"` is currently supported. Fields use meters,
+seconds, seconds per kilometer, bpm, and spm. Lap pace is converted only from
+Garmin's `averageMovingSpeed`; unavailable values are `null`.
+
+`garmin_activity_aerobic_drift` requests at most 1,000 Garmin chart points with
+no polyline, resolves channels through Garmin metric descriptors, calculates
+locally, and returns no sample array. Usable running distance is divided into
+equal distance halves. For each half, speed is distance divided by included
+moving time and HR is trapezoidally time-weighted. Efficiency is `speed / HR`,
+and decoupling is `(first_efficiency - second_efficiency) / first_efficiency *
+100`; positive decoupling means efficiency worsened in the second half. Positive
+HR, speed, and pace changes mean higher HR, faster speed, and slower pace,
+respectively.
+
+The drift result is marked unusable with factual warnings below 1,200 seconds,
+3,000 meters, or 20 valid samples; for missing or invalid channels; for a stop
+or walk/stand section of at least 60 seconds and 5% of elapsed time; for
+interval-like laps; for more than 10% half-pace difference; or for an elevation
+range of at least 60 meters together with at least 20 meters climbed per
+kilometer. Garmin may downsample long activities, and the tool provides no
+medical or coaching classification.
 
 Milestone 5 date ranges are inclusive, require strict `YYYY-MM-DD`, and contain
 at most 42 days. Retrieval uses Garmin's running-filtered date endpoint, which

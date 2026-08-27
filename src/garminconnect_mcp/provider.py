@@ -14,11 +14,14 @@ from garminconnect import (
 
 from .activities import (
     NormalizedActivity,
+    NormalizedActivitySplits,
     activity_is_running,
     activity_items,
     normalize_activity,
+    normalize_activity_splits,
     normalized_activity_date,
 )
+from .aerobic_drift import AerobicDriftSummary, analyze_aerobic_drift
 from .heart_rate_zones import (
     MalformedHeartRateZoneResponseError,
     NormalizedHeartRateZones,
@@ -71,6 +74,14 @@ class GarminClient(Protocol):
     ) -> Any: ...
 
     def get_activity(self, activity_id: str) -> Any: ...
+
+    def get_activity_splits(self, activity_id: str) -> Any: ...
+
+    def get_activity_typed_splits(self, activity_id: str) -> Any: ...
+
+    def get_activity_details(
+        self, activity_id: str, maxchart: int = 2000, maxpoly: int = 4000
+    ) -> Any: ...
 
     def get_activities_by_date(
         self,
@@ -161,11 +172,7 @@ class GarminActivityProvider:
         return normalized
 
     def activity(self, activity_id: str) -> NormalizedActivity:
-        normalized_id = activity_id.strip() if isinstance(activity_id, str) else ""
-        if not normalized_id.isdecimal() or int(normalized_id) <= 0:
-            raise InvalidActivityRequestError(
-                "activity_id must be a positive numeric identifier"
-            )
+        normalized_id = self._activity_id(activity_id)
 
         raw = self._call(
             "activity details",
@@ -173,6 +180,45 @@ class GarminActivityProvider:
             not_found=True,
         )
         return normalize_activity(raw)
+
+    def activity_splits(
+        self, activity_id: str, *, mode: str = "laps"
+    ) -> NormalizedActivitySplits:
+        normalized_id = self._activity_id(activity_id)
+        if mode != "laps":
+            raise InvalidActivityRequestError("mode must be 'laps'")
+        raw = self._call(
+            "activity splits",
+            lambda client: client.get_activity_splits(normalized_id),
+            not_found=True,
+        )
+        return normalize_activity_splits(raw, activity_id=normalized_id)
+
+    def aerobic_drift(self, activity_id: str) -> AerobicDriftSummary:
+        normalized_id = self._activity_id(activity_id)
+        details = self._call(
+            "activity details",
+            lambda client: client.get_activity_details(
+                normalized_id, maxchart=1000, maxpoly=0
+            ),
+            not_found=True,
+        )
+        recorded_laps = self._call(
+            "activity splits",
+            lambda client: client.get_activity_splits(normalized_id),
+            not_found=True,
+        )
+        typed_splits = self._call(
+            "typed activity splits",
+            lambda client: client.get_activity_typed_splits(normalized_id),
+            not_found=True,
+        )
+        return analyze_aerobic_drift(
+            normalized_id,
+            details,
+            recorded_laps=recorded_laps,
+            typed_splits=typed_splits,
+        )
 
     def running_activities_by_date(
         self, start_date: str, end_date: str
@@ -218,6 +264,15 @@ class GarminActivityProvider:
             return validate_date(value, name=name)
         except ValueError as exc:
             raise InvalidActivityRequestError(str(exc)) from exc
+
+    @staticmethod
+    def _activity_id(activity_id: Any) -> str:
+        normalized_id = activity_id.strip() if isinstance(activity_id, str) else ""
+        if not normalized_id.isdecimal() or int(normalized_id) <= 0:
+            raise InvalidActivityRequestError(
+                "activity_id must be a positive numeric identifier"
+            )
+        return normalized_id
 
     def _call(
         self,

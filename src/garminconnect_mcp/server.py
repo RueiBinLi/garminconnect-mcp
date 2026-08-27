@@ -366,6 +366,42 @@ def garmin_activity(activity_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def garmin_activity_splits(
+    activity_id: StrictStr, mode: StrictStr = "laps"
+) -> dict[str, Any]:
+    """Get compact normalized Garmin-recorded laps for one activity.
+
+    Only mode="laps" is supported. Recorded laps may be manual, Auto Lap,
+    interval, mile-based, or partial; they are not guaranteed kilometers.
+    Pace uses Garmin average moving speed and is returned in seconds per
+    kilometer. Other units are meters, seconds, bpm, and spm. Missing fields
+    are null, and no raw Garmin lap payload is returned. This tool is read-only.
+    """
+    return _activity_provider().activity_splits(activity_id, mode=mode)
+
+
+_forbid_unknown_tool_arguments("garmin_activity_splits")
+
+
+@mcp.tool()
+def garmin_activity_aerobic_drift(activity_id: StrictStr) -> dict[str, Any]:
+    """Calculate compact factual aerobic drift metrics for one activity.
+
+    Garmin detail samples are processed locally and never returned. Usable
+    running distance is divided into equal distance halves; HR is time-weighted,
+    speed is distance divided by moving time, and positive decoupling means
+    speed/HR efficiency worsened in the second half. Garmin may downsample long
+    activities to the requested 1000 chart points. Warnings identify unsuitable
+    data or activity structure. This tool is read-only and offers no medical or
+    coaching classification.
+    """
+    return _activity_provider().aerobic_drift(activity_id)
+
+
+_forbid_unknown_tool_arguments("garmin_activity_aerobic_drift")
+
+
+@mcp.tool()
 def garmin_running_activities_by_date(start_date: str, end_date: str) -> dict[str, Any]:
     """List normalized runs in an inclusive YYYY-MM-DD range of at most 42 days.
 

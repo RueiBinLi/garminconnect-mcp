@@ -156,6 +156,43 @@ normalization boundary. Stable provider errors distinguish invalid requests,
 authentication failures, unknown activities, malformed responses, rate limits,
 and general endpoint failures without copying upstream exception text.
 
+## Recorded-lap and aerobic-drift boundary
+
+`garmin_activity_splits` reads `get_activity_splits()` and normalizes only
+`lapDTOs`. Its `split_type` is `lap`: Auto Lap, manual, interval, mile-based, and
+partial laps remain recorded laps and are never relabeled as kilometers. Pace
+uses Garmin `averageMovingSpeed` only. The public fields use meters, seconds,
+seconds per kilometer, bpm, and spm; missing measurements are `null`.
+
+`garmin_activity_aerobic_drift` requests `get_activity_details()` with
+`maxchart=1000` and `maxpoly=0`. Garmin can downsample long activities. Metric
+positions are resolved from `metricDescriptors`; fixed indexes are forbidden.
+Raw samples and polylines remain inside the provider/analysis boundary.
+
+The pure analyzer removes stationary segments from the running halves while
+retaining them as validity evidence, divides accumulated usable distance in
+half, and proportionally splits a segment that crosses the midpoint. Half HR is
+trapezoidally time-weighted and half speed is distance divided by included time:
+
+```text
+efficiency = average_speed_m_per_s / average_hr_bpm
+decoupling_pct =
+    (first_half_efficiency - second_half_efficiency)
+    / first_half_efficiency
+    * 100
+```
+
+Positive decoupling means second-half efficiency worsened. Positive HR change
+means higher HR, positive speed change means faster speed, and positive pace
+change means slower pace. Duration, distance, sample coverage, stops,
+walk/stand typed splits, interval-like lap intensity, half-pace difference, and
+elevation evidence determine `usable_for_drift_analysis`. Minimums are 1,200
+usable seconds, 3,000 usable meters, and 20 valid samples. A stop or walk/stand
+section is substantial at 60 seconds and 5% of elapsed time. Half pace may
+differ by at most 10%; strongly uneven elevation means at least 60 meters of
+range and 20 meters climbed per kilometer. Warnings preserve factual metrics
+without adding medical or coaching interpretation.
+
 ## Milestone 5 running-summary boundary
 
 The provider exposes one new read-only operation over the dependency's
@@ -636,7 +673,7 @@ Saved-token Garmin client
 Neither configuration contains Garmin credentials, tokens, MFA values, or a
 repository-local token path. The untracked host configuration stores the
 absolute executable path and `serve` argument; authentication keeps using the
-external default token directory. All 32 tools remain discoverable so future
+external default token directory. All 34 tools remain discoverable so future
 milestones can use the same connection, but the project policy prompts before
 tools by default; only `garmin_connection_status` and `garmin_ping` have
 automatic approval.
@@ -702,7 +739,7 @@ deliberate MCP 2.x migration remains a possible later change.
 
 ## Existing MCP tools
 
-The server exposes 32 tools.
+The server exposes 34 tools.
 
 | Tool | Kind | Current behavior | Specification status |
 | --- | --- | --- | --- |

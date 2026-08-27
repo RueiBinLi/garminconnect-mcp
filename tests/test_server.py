@@ -364,6 +364,72 @@ def test_tools_pass_explicit_arguments(fake_client: FakeClient) -> None:
     ]
 
 
+def test_new_activity_tools_return_compact_provider_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReadOnlyActivityProvider:
+        def activity_splits(self, activity_id: str, *, mode: str) -> object:
+            assert (activity_id, mode) == ("987", "laps")
+            return {
+                "activity_id": "987",
+                "split_type": "lap",
+                "splits": [{"split_index": 1, "distance_m": 1000.0}],
+            }
+
+        def aerobic_drift(self, activity_id: str) -> object:
+            assert activity_id == "987"
+            return {
+                "activity_id": "987",
+                "method": "distance_halves_time_weighted_speed_hr_efficiency",
+                "usable_for_drift_analysis": True,
+                "aerobic_decoupling_pct": 1.25,
+                "sample_count": 100,
+                "warnings": [],
+            }
+
+    activity_provider = ReadOnlyActivityProvider()
+    monkeypatch.setattr(server, "_activity_provider", lambda: activity_provider)
+
+    splits = server.garmin_activity_splits("987")
+    drift = server.garmin_activity_aerobic_drift("987")
+
+    assert splits["split_type"] == "lap"
+    assert splits["splits"][0]["distance_m"] == 1000.0
+    assert drift["aerobic_decoupling_pct"] == 1.25
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("garmin_activity_splits", {"activity_id": 987}),
+        ("garmin_activity_splits", {"activity_id": "987", "mode": 1}),
+        ("garmin_activity_splits", {"activity_id": "987", "unknown": True}),
+        ("garmin_activity_aerobic_drift", {"activity_id": 987}),
+        ("garmin_activity_aerobic_drift", {"activity_id": "987", "unknown": True}),
+    ],
+)
+def test_new_activity_tools_reject_invalid_mcp_arguments_before_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    arguments: dict[str, object],
+) -> None:
+    calls = 0
+
+    def forbidden_provider() -> object:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("provider must not be constructed")
+
+    monkeypatch.setattr(server, "_activity_provider", forbidden_provider)
+
+    async def call_tool() -> None:
+        await server.mcp.call_tool(tool_name, arguments)
+
+    with pytest.raises(ToolError):
+        anyio.run(call_tool)
+    assert calls == 0
+
+
 def test_hrv_range_returns_bounded_normalized_envelope(
     fake_client: FakeClient,
 ) -> None:

@@ -590,6 +590,21 @@ calendar items, and no unrelated changes. No private live value is retained.
 
 # Future Milestones
 
+## Recorded Laps and Aerobic Drift
+
+The read-only implementation, synthetic verification, and manual Garmin
+verification are complete. It adds
+compact Garmin-recorded laps and descriptor-resolved, locally calculated
+speed/HR decoupling over equal distance halves. Raw activity samples are never
+returned. A real run with materially different half pace was correctly marked
+unusable for steady-state interpretation while retaining compact factual
+metrics. Verification used read-only activity operations only; no private live
+value is retained and no Garmin state changed.
+
+---
+
+## Later possibilities
+
 Possible later work:
 
 * training-plan adjustment after missed runs

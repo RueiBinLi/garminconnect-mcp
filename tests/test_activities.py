@@ -9,6 +9,7 @@ from garminconnect_mcp.activities import (
     activity_is_running,
     activity_items,
     normalize_activity,
+    normalize_activity_splits,
     normalized_activity_date,
 )
 
@@ -138,3 +139,75 @@ def test_normalized_activity_date_prefers_local_and_handles_unavailable() -> Non
     assert normalized_activity_date(activity) == date(2030, 4, 11)
     activity["start_time_gmt"] = None
     assert normalized_activity_date(activity) is None
+
+
+def test_normalize_activity_splits_preserves_recorded_laps_and_partial_final() -> None:
+    result = normalize_activity_splits(
+        {
+            "activityId": 9000000100,
+            "lapDTOs": [
+                {
+                    "lapIndex": 1,
+                    "startTimeLocal": "2030-04-12 06:00:00",
+                    "distance": 1000,
+                    "duration": 310,
+                    "movingDuration": 300,
+                    "elapsedDuration": 315,
+                    "averageSpeed": 9.9,
+                    "averageMovingSpeed": 3.333333333,
+                    "averageHR": 145,
+                    "maxHR": 152,
+                    "averageRunCadence": 170,
+                    "elevationGain": 4,
+                    "elevationLoss": 3,
+                    "intensityType": "ACTIVE",
+                    "privateRawField": "discard me",
+                },
+                {"lapIndex": 2, "distance": 437.2, "movingDuration": 140},
+            ],
+        },
+        activity_id="9000000100",
+    )
+
+    assert result == {
+        "activity_id": "9000000100",
+        "split_type": "lap",
+        "splits": [
+            {
+                "split_index": 1,
+                "start_time_local": "2030-04-12 06:00:00",
+                "distance_m": 1000.0,
+                "duration_s": 310.0,
+                "moving_duration_s": 300.0,
+                "elapsed_duration_s": 315.0,
+                "pace_s_per_km": 300.0,
+                "average_heart_rate_bpm": 145.0,
+                "maximum_heart_rate_bpm": 152.0,
+                "average_cadence_spm": 170.0,
+                "elevation_gain_m": 4.0,
+                "elevation_loss_m": 3.0,
+                "intensity_type": "ACTIVE",
+            },
+            {
+                "split_index": 2,
+                "start_time_local": None,
+                "distance_m": 437.2,
+                "duration_s": None,
+                "moving_duration_s": 140.0,
+                "elapsed_duration_s": None,
+                "pace_s_per_km": None,
+                "average_heart_rate_bpm": None,
+                "maximum_heart_rate_bpm": None,
+                "average_cadence_spm": None,
+                "elevation_gain_m": None,
+                "elevation_loss_m": None,
+                "intensity_type": None,
+            },
+        ],
+    }
+
+
+@pytest.mark.parametrize("raw", [{}, {"lapDTOs": []}, {"lapDTOs": [None]}])
+def test_normalize_activity_splits_rejects_malformed_or_empty(raw: object) -> None:
+    with pytest.raises(MalformedActivityResponseError, match="activity|laps"):
+        normalize_activity_splits(raw, activity_id="9000000101")
