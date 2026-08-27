@@ -12,8 +12,14 @@ from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
 from pydantic import StrictBool, StrictInt, StrictStr
 
+from .planner import (
+    ProposalConstraints,
+    WeeklyProposalService,
+    validate_proposal_request,
+)
 from .provider import (
     GarminActivityProvider,
+    GarminHeartRateZoneProvider,
     GarminRecoveryProvider,
     GarminWorkoutProvider,
     InvalidActivityRequestError,
@@ -120,6 +126,19 @@ def _recovery_provider() -> GarminRecoveryProvider:
 
 def _workout_provider() -> GarminWorkoutProvider:
     return GarminWorkoutProvider(_client)
+
+
+def _heart_rate_zone_provider() -> GarminHeartRateZoneProvider:
+    return GarminHeartRateZoneProvider(_client)
+
+
+def _weekly_proposal_service() -> WeeklyProposalService:
+    return WeeklyProposalService(
+        _activity_provider,
+        _recovery_provider,
+        _workout_provider,
+        _heart_rate_zone_provider,
+    )
 
 
 def _first_present(data: dict[str, Any], keys: tuple[str, ...]) -> Any:
@@ -292,6 +311,18 @@ def garmin_stress(day: str | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
+def garmin_running_heart_rate_zones() -> dict[str, Any]:
+    """Get configured running heart-rate zones as compact bpm ranges.
+
+    Garmin's running profile is preferred; the default profile is used only
+    when a running-specific profile is unavailable and source_sport exposes
+    that fallback. Raw biometric settings, profile fields, and device data are
+    discarded. This tool is read-only.
+    """
+    return _heart_rate_zone_provider().running_zones()
+
+
+@mcp.tool()
 def garmin_recent_activities(
     start: int = 0, limit: int = 10, running_only: bool = False
 ) -> dict[str, Any]:
@@ -425,6 +456,27 @@ def garmin_compare_recent_long_runs(end_date: str, limit: int = 3) -> dict[str, 
         "requested_preceding_limit": limit,
         **result,
     }
+
+
+@mcp.tool()
+def garmin_weekly_running_proposal(
+    week_start: StrictStr, constraints: ProposalConstraints
+) -> dict[str, Any]:
+    """Propose running sessions for exactly one Monday-Sunday week, read-only.
+
+    The strict constraints accept only available_dates, desired_sessions,
+    maximum_sessions, preferred_long_run_date, maximum_weekly_distance_m, and
+    user_note. The tool reads 28 preceding activity days, 7 preceding HRV days,
+    configured running heart-rate zones, and scheduled workouts in the requested
+    week through normalized providers. It preserves
+    existing commitments and returns validated WorkoutDefinitions as proposals.
+    It never creates, schedules, modifies, unschedules, deletes, or pushes.
+    """
+    monday, normalized = validate_proposal_request(week_start, constraints)
+    return _weekly_proposal_service().propose(monday.isoformat(), normalized)
+
+
+_forbid_unknown_tool_arguments("garmin_weekly_running_proposal")
 
 
 @mcp.tool()

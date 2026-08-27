@@ -81,6 +81,23 @@ class FakeClient:
         self.calls.append(("get_stress_data", (cdate,), {}))
         return {"calendarDate": cdate, "avgStressLevel": 1}
 
+    def get_heart_rate_zones(self) -> list[dict[str, object]]:
+        self.calls.append(("get_heart_rate_zones", (), {}))
+        return [
+            {
+                "sport": "RUNNING",
+                "trainingMethod": "LTHR",
+                "maxHeartRateUsed": 190,
+                "restingHeartRateUsed": 50,
+                "lactateThresholdHeartRateUsed": 170,
+                "zone1Floor": 100,
+                "zone2Floor": 120,
+                "zone3Floor": 140,
+                "zone4Floor": 160,
+                "zone5Floor": 175,
+            }
+        ]
+
     def get_activities(
         self,
         start: int = 0,
@@ -465,6 +482,73 @@ def test_recent_long_run_comparison_rejects_date_underflow_before_garmin(
 ) -> None:
     with pytest.raises(InvalidActivityRequestError, match="too early"):
         server.garmin_compare_recent_long_runs("0001-01-01", 4)
+    assert fake_client.calls == []
+
+
+def test_weekly_proposal_uses_only_four_normalized_read_operations(
+    fake_client: FakeClient,
+) -> None:
+    result = server.garmin_weekly_running_proposal(
+        "2030-04-01",
+        server.ProposalConstraints(available_dates=["2030-04-02"], maximum_sessions=1),
+    )
+
+    assert result["proposal_only"] is True
+    assert result["created"] is False
+    assert result["scheduled"] is False
+    assert result["proposed_sessions"] == []
+    assert fake_client.calls == [
+        (
+            "get_activities_by_date",
+            ("2030-03-04", "2030-03-31"),
+            {"activitytype": "running", "sortorder": "asc"},
+        ),
+        ("get_hrv_data_range", ("2030-03-25", "2030-03-31"), {}),
+        ("get_scheduled_workouts", (2030, 4), {}),
+        ("get_heart_rate_zones", (), {}),
+    ]
+
+
+def test_running_heart_rate_zones_returns_compact_normalized_ranges(
+    fake_client: FakeClient,
+) -> None:
+    result = server.garmin_running_heart_rate_zones()
+    assert result["source_sport"] == "running"
+    assert result["zones"][1] == {
+        "zone": 2,
+        "minimum_heart_rate_bpm": 120,
+        "maximum_heart_rate_bpm": 139,
+    }
+    assert fake_client.calls == [("get_heart_rate_zones", (), {})]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"week_start": "2030-04-02", "constraints": {}},
+        {"week_start": "2030-04-01T00:00:00", "constraints": {}},
+        {"week_start": "2030-04-01", "constraints": {"maximum_sessions": "3"}},
+        {"week_start": "2030-04-01", "constraints": {"desired_sessions": "4"}},
+        {
+            "week_start": "2030-04-01",
+            "constraints": {"desired_sessions": 4, "maximum_sessions": 3},
+        },
+        {"week_start": "2030-04-01", "constraints": {"unknown": True}},
+        {
+            "week_start": "2030-04-01",
+            "constraints": {"available_dates": ["2030-04-08"]},
+        },
+        {"week_start": "2030-04-01", "constraints": {}, "raw": {}},
+    ],
+)
+def test_weekly_proposal_rejects_invalid_mcp_requests_before_garmin(
+    fake_client: FakeClient, arguments: dict[str, object]
+) -> None:
+    async def call_tool() -> None:
+        await server.mcp.call_tool("garmin_weekly_running_proposal", arguments)
+
+    with pytest.raises(ToolError):
+        anyio.run(call_tool)
     assert fake_client.calls == []
 
 

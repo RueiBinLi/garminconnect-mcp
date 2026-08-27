@@ -1,3 +1,58 @@
+# Milestone 11 Weekly Proposal Verification (Read-only)
+
+Milestone 11 was completed and manually verified on 2026-08-27. No write tool
+was used during verification.
+
+## Required offline verification before a live read
+
+Run:
+
+```bash
+scripts/check-private-output.sh
+.venv/bin/python -m pip check
+.venv/bin/python -m pytest
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m compileall -q src
+```
+
+Also initialize the MCP server over stdio, list tools, make synthetic proposal
+calls with fake clients, and audit that the proposal service exposes only the
+normalized activity, HRV, scheduled-workout, and configured heart-rate-zone
+reads. Do not perform a live read until every offline check passes.
+
+## One live read-only proposal
+
+Obtain one exact future Monday in `YYYY-MM-DD` and one constraints object from
+the user. Those values authorize only the four normalized reads and proposal
+generation. Call only `garmin_weekly_running_proposal`. Never call a
+create, preview-create, schedule, unschedule, legacy write, upload, delete,
+modify, clone, cleanup, rollback, retry, or device-push operation.
+
+Report only the compact normalized response. Ask the user to verify the factual
+training, recovery, and configured Zone 2 inputs; coverage; constraints;
+preserved scheduled commitments; rules/calculations; warnings; proposed dates,
+purposes, WorkoutDefinitions, ordered steps, Zone 2 targets, explicit units,
+aggregates, completeness; and the statement that no Garmin workout or calendar
+change occurred.
+
+The user confirmed the compact factual inputs, coverage, constraints, absence
+of scheduled commitments, deterministic calculations, four proposed sessions,
+ordered distance steps, configured running Zone 2 targets, aggregates,
+unavailable inputs, and absence of Garmin changes. The first live proposal was
+rejected because its two-session distance split made the labelled long run
+shorter than the easy run; the deterministic split was corrected and fully
+retested before a new explicitly authorized read. A later extension added
+strict desired-session semantics and normalized configured-zone reads, and its
+four-session proposal passed manual verification. No private date, bpm value,
+health measurement, identifier, calendar content, account value, device value,
+or raw response is retained in this record.
+
+All required checks were rerun after acceptance. Milestone 12 was not started,
+and pushing remains subject to separate explicit authorization.
+
+---
+
 # Completed Milestone 10 Safe Create-and-Schedule Verification
 
 Milestone 10 was completed and manually verified on 2026-08-27. The default

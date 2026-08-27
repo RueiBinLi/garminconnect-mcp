@@ -26,6 +26,10 @@ creating exactly one new validated running workout and scheduling only that
 newly returned workout ID on one date. One exact synthetic workflow and its
 manual Garmin verification passed on 2026-08-27; private identifiers were not
 recorded.
+Milestone 11 adds a read-only weekly running-proposal application service,
+strict desired-session constraints, and normalized configured running Zone 2
+reads. Offline verification and one manually accepted live proposal passed on
+2026-08-27 without a Garmin write or retained private value.
 
 ## Repository structure
 
@@ -34,14 +38,18 @@ garminconnect-mcp/
 ├── src/garminconnect_mcp/server.py  # Authentication, MCP tools, CLI
 ├── src/garminconnect_mcp/provider.py # Garmin activity/recovery/workout providers and safe errors
 ├── src/garminconnect_mcp/activities.py # Pure activity normalization and schema
+├── src/garminconnect_mcp/heart_rate_zones.py # Pure zone normalization
 ├── src/garminconnect_mcp/training.py # Pure weekly and long-run aggregation
+├── src/garminconnect_mcp/planner.py # Strict deterministic weekly proposal service
 ├── src/garminconnect_mcp/recovery.py # Pure recovery normalization and schemas
 ├── src/garminconnect_mcp/workouts.py # Pure workout normalization and schemas
 ├── src/garminconnect_mcp/workout_builder.py # Strict pre-write model, aggregation, and serializer
 ├── tests/test_server.py             # Synthetic unit tests with a fake Garmin client
 ├── tests/test_provider.py           # Synthetic activity provider/error tests
 ├── tests/test_activities.py         # Synthetic activity normalization tests
+├── tests/test_heart_rate_zones.py   # Synthetic zone/provider tests
 ├── tests/test_training.py           # Synthetic running aggregation tests
+├── tests/test_planner.py            # Synthetic weekly proposal and safety tests
 ├── tests/test_recovery.py           # Synthetic recovery normalization tests
 ├── tests/test_recovery_provider.py  # Synthetic recovery provider/error tests
 ├── tests/test_workouts.py           # Synthetic workout normalization tests
@@ -472,6 +480,60 @@ Garmin exposes no stable workout-creation idempotency key and this local server
 has no database. The workflow therefore cannot guarantee creation deduplication
 after an uncertain upload. Manual Garmin inspection is mandatory before any new
 proposal or action; the uncertain invocation must never be replayed.
+
+## Milestone 11 weekly proposal boundary
+
+The public interface is
+`garmin_weekly_running_proposal(week_start, constraints)`. FastMCP and the
+application service validate the complete strict request before any provider
+factory can obtain the cached Garmin client. The planner receives only three
+read interfaces:
+
+```text
+strict request
+    -> 28-day normalized running-activity read
+    -> 7-day normalized HRV read
+    -> 7-day normalized scheduled-workout read
+    -> configured running/default heart-rate-zone read
+    -> pure deterministic proposal construction
+    -> strict WorkoutDefinition validation and aggregation
+    -> compact proposal-only response
+```
+
+No interface supplied to the planner contains an upload, creation, scheduling,
+modification, unscheduling, deletion, retry, cleanup, rollback, cloning, or
+device-push method. The service cannot call the legacy write tools. Scheduled
+commitments lose both private identifier fields and descriptions before they
+enter the result.
+
+The activity lookback is exactly the four complete Monday-Sunday weeks before
+the requested week (28 inclusive days). HRV coverage is the final seven days of
+that lookback. Scheduled-workout coverage is exactly the requested week. Hard-
+session classification is explicitly unavailable because the existing compact
+activity boundary contains measurements but no validated effort-category fact.
+
+The zone provider invokes the dependency's dedicated
+`get_heart_rate_zones()` read. It accepts only Garmin's running or default sport
+profile, validates five strictly increasing floors and the configured maximum,
+and derives contiguous inclusive bpm ranges. Running wins over default. The
+planner uses only Zone 2's exact lower and upper bpm bounds for each main run
+step; warmup and cooldown remain untargeted. Raw biometric responses, account
+settings, device fields, and unrelated sport profiles cannot cross the
+normalizer.
+
+The deterministic policy requires at least two non-empty weeks with complete
+distance coverage. It uses the rounded median distance and floored median run
+count as baselines. Two or more normalized HRV statuses in the explicit
+`low`/`unbalanced`/`poor` set multiply new distance by 0.90; an optional cap is
+applied next. Existing running commitments consume date and count capacity. A
+new long run receives 100% with one new session, 60% with two, or 40% with
+three or more; the rest is divided across easy runs. Each distance-only
+definition has ordered 10% untargeted warmup, 80% configured Zone 2 run, and
+10% untargeted cooldown steps. `desired_sessions` replaces the historical
+session baseline when supplied, while `maximum_sessions` remains a hard cap.
+Every numeric intermediate is
+returned under `rule_calculations`; the policy is a product rule, not medical or
+scientific advice.
 
 ## Codex integration
 

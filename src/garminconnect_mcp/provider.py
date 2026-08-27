@@ -19,6 +19,11 @@ from .activities import (
     normalize_activity,
     normalized_activity_date,
 )
+from .heart_rate_zones import (
+    MalformedHeartRateZoneResponseError,
+    NormalizedHeartRateZones,
+    normalize_running_heart_rate_zones,
+)
 from .recovery import (
     NormalizedBodyBattery,
     NormalizedDailyStatistics,
@@ -88,6 +93,8 @@ class GarminClient(Protocol):
     def get_body_battery(self, startdate: str, enddate: str | None = None) -> Any: ...
 
     def get_stress_data(self, cdate: str) -> Any: ...
+
+    def get_heart_rate_zones(self) -> Any: ...
 
     def get_scheduled_workouts(self, year: int, month: int) -> Any: ...
 
@@ -335,6 +342,65 @@ class GarminRecoveryProvider:
             raise RecoveryEndpointError(f"Garmin {operation} endpoint failed") from exc
         except Exception as exc:
             raise RecoveryEndpointError(f"Garmin {operation} endpoint failed") from exc
+
+
+class HeartRateZoneProviderError(RuntimeError):
+    """Base class for stable, secret-safe zone-provider failures."""
+
+
+class HeartRateZoneAuthenticationError(HeartRateZoneProviderError):
+    pass
+
+
+class HeartRateZoneEndpointError(HeartRateZoneProviderError):
+    pass
+
+
+class HeartRateZoneResponseError(HeartRateZoneProviderError):
+    pass
+
+
+class HeartRateZoneUnsupportedError(HeartRateZoneProviderError):
+    pass
+
+
+class GarminHeartRateZoneProvider:
+    """Read and normalize configured running HR zones without profile data."""
+
+    def __init__(self, client_factory: Callable[[], GarminClient]) -> None:
+        self._client_factory = client_factory
+
+    def running_zones(self) -> NormalizedHeartRateZones:
+        try:
+            client = self._client_factory()
+            method = getattr(client, "get_heart_rate_zones", None)
+            if method is None:
+                raise HeartRateZoneUnsupportedError(
+                    "Installed Garmin client does not support heart-rate-zone reads"
+                )
+            raw = method()
+        except HeartRateZoneUnsupportedError:
+            raise
+        except GarminConnectAuthenticationError as exc:
+            raise HeartRateZoneAuthenticationError(
+                "Garmin authentication failed; refresh the saved login"
+            ) from exc
+        except GarminConnectTooManyRequestsError as exc:
+            raise HeartRateZoneEndpointError(
+                "Garmin heart-rate-zone endpoint rate limit was reached"
+            ) from exc
+        except (GarminConnectConnectionError, GarminConnectNotFoundError) as exc:
+            raise HeartRateZoneEndpointError(
+                "Garmin heart-rate-zone endpoint failed"
+            ) from exc
+        except Exception as exc:
+            raise HeartRateZoneEndpointError(
+                "Garmin heart-rate-zone endpoint failed"
+            ) from exc
+        try:
+            return normalize_running_heart_rate_zones(raw)
+        except MalformedHeartRateZoneResponseError as exc:
+            raise HeartRateZoneResponseError(str(exc)) from exc
 
 
 class WorkoutProviderError(RuntimeError):

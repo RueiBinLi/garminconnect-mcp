@@ -512,7 +512,8 @@ of duplicates or unrelated changes, and normal Garmin device synchronization.
 No automatic retry, rollback, cleanup, unscheduling, deletion, modification, or
 device push occurred. Private identifiers are intentionally omitted. Reliable
 creation deduplication remains unavailable without a stable Garmin idempotency
-key or local database. Milestone 11 has not started.
+key or local database. Milestone 11 was completed and manually verified on
+2026-08-27 without a Garmin write or retained private value.
 
 ---
 
@@ -526,19 +527,27 @@ Generate a proposed next week based on recent Garmin data.
 
 Use available information such as:
 
-* [ ] recent run frequency
-* [ ] recent weekly distance
-* [ ] recent longest run
-* [ ] hard sessions
-* [ ] recovery metrics
-* [ ] already scheduled workouts
-* [ ] explicit user constraints
+* [x] recent run frequency
+* [x] recent weekly distance
+* [x] recent longest run
+* [x] hard sessions explicitly represented as unavailable until normalized
+      evidence exists
+* [x] normalized HRV status and measurement coverage
+* [x] configured running/default heart-rate zones with exact Zone 2 bpm bounds
+* [x] already scheduled running workouts, compacted and preserved
+* [x] strict explicit user constraints
+* [x] desired session count with maximum sessions retained as a hard cap
 
 ## Output
 
-Produce a structured weekly proposal.
+Produce a compact structured weekly proposal with separately labeled facts,
+coverage, constraints, rules, calculations, warnings, unavailable inputs,
+existing commitments, strict WorkoutDefinitions, and aggregates.
 
-No automatic Garmin writes.
+No automatic Garmin writes. Offline and live read-only verification passed on
+2026-08-27. The user confirmed the normalized facts, configured Zone 2 usage,
+constraints, deterministic four-session proposal, aggregates, unavailable
+inputs, and absence of Garmin changes. Private values are intentionally omitted.
 
 ---
 

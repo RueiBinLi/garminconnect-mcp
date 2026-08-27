@@ -373,6 +373,57 @@ steps, assignment, lack of duplicates, unchanged existing workouts/calendar
 items, and normal device synchronization behavior. No private IDs or raw Garmin
 data are retained. The test workout was not automatically unscheduled or deleted.
 
+## Milestone 11 weekly running proposals
+
+Milestone 11 was completed and manually verified read-only on 2026-08-27. No
+Garmin workout or calendar change was made and no private value was retained.
+
+`garmin_weekly_running_proposal(week_start, constraints)` produces one compact,
+read-only Monday-Sunday proposal. `week_start` must be a strict `YYYY-MM-DD`
+Monday. The strict constraints object accepts only:
+
+- `available_dates`: one to seven unique dates inside the proposal week;
+- `desired_sessions`: requested session count from 1 through 7;
+- `maximum_sessions`: integer from 1 through 7 (default 3);
+- `preferred_long_run_date`: an available date inside the week;
+- `maximum_weekly_distance_m`: 1,000 through 300,000 meters;
+- `user_note`: 1 through 200 printable ASCII characters.
+
+The bounded reads are the 28 days immediately before the proposal week for
+normalized running activities, the final 7 of those days for normalized HRV,
+and the requested 7-day week for normalized scheduled workouts. Existing
+scheduled runs are preserved as commitments and consume both their date and
+session capacity. IDs, descriptions, raw calendar objects, and Garmin payloads
+are discarded from the proposal.
+
+One additional read retrieves configured heart-rate-zone floors. The running
+profile is preferred; Garmin's default profile is used only when running zones
+are absent, and `source_sport` exposes that fallback. Only normalized bpm
+ranges, the training method, and compact heart-rate facts survive. Raw
+biometric settings, profile/account fields, and device data are discarded.
+
+The initial product policy is deliberately simple. At least two non-empty
+lookback weeks must have complete distance coverage. Their median weekly
+distance, rounded to 100 m, is the distance baseline; the floor of their median
+run count is the session baseline. Two or more Garmin HRV statuses equal to
+`low`, `unbalanced`, or `poor` apply an explicit 0.90 distance multiplier. The
+optional distance cap is then applied. The long run receives 100% with one new
+session, 60% with two, or 40% with three or more; the remainder is divided
+equally. Each proposal uses a strict
+distance-based `WorkoutDefinition` with 10% untargeted warmup, an 80% main step
+targeted to Garmin's exact configured Zone 2 bpm bounds, and 10% untargeted
+cooldown. `desired_sessions` replaces the historical session baseline when
+supplied, while `maximum_sessions` remains a hard cap. These are transparent
+product rules, not scientific guarantees or medical conclusions.
+
+Insufficient history returns no new sessions instead of invented precision.
+Missing measurements remain unavailable rather than zero. The response keeps
+facts, coverage, constraints, rules/calculations, warnings, commitments,
+proposed sessions, and aggregates separate, and always reports
+`proposal_only=true`, `created=false`, and `scheduled=false`. This workflow has
+no create, upload, schedule, modify, unschedule, delete, retry, cleanup, or
+device-push path.
+
 ## Development
 
 ```bash
