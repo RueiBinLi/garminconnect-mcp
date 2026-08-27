@@ -590,6 +590,16 @@ calendar items, and no unrelated changes. No private live value is retained.
 
 # Future Milestones
 
+## Activity Temperature and Weather Observation
+
+Implementation and synthetic verification add two independent read-only tools.
+Activity/device-recorded `directAirTemperature` is summarized in Celsius with
+an arithmetic mean, minimum, maximum, and sample count. The separate historical
+weather-station observation preserves its offset-bearing timestamp while
+leaving unverified temperature and wind units unqualified. Neither tool exposes
+raw series, coordinates, station name, or raw Garmin payloads. Manual Garmin
+Connect verification remains pending.
+
 ## Recorded Laps and Aerobic Drift
 
 The read-only implementation, synthetic verification, and manual Garmin

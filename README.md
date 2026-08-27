@@ -125,6 +125,8 @@ Normalized read-only activity tools:
 
 - `garmin_recent_activities(start=0, limit=10, running_only=false)`
 - `garmin_activity(activity_id)`
+- `garmin_activity_temperature(activity_id)`
+- `garmin_activity_weather(activity_id)`
 - `garmin_activity_splits(activity_id, mode="laps")`
 - `garmin_activity_aerobic_drift(activity_id)`
 - `garmin_running_activities_by_date(start_date, end_date)`
@@ -187,6 +189,22 @@ Activity responses are normalized behind a Garmin provider boundary and never
 return raw chart, polyline, owner, profile-image, role, or privacy metadata.
 Invalid pagination, unknown IDs, malformed responses, authentication failures,
 rate limits, and endpoint failures produce bounded, secret-safe errors.
+
+`garmin_activity_temperature` summarizes Garmin activity-detail
+`directAirTemperature` samples, which were verified as Celsius. It returns an
+arithmetic mean, minimum, maximum, valid sample count, source, and warnings; it
+never returns the sample series. Missing, non-numeric, and non-finite samples
+are ignored without estimation. These are activity/device-recorded readings and
+may be affected by device placement, body heat, sunlight, and local exposure.
+
+`garmin_activity_weather` is a separate historical weather-station observation
+associated with a completed activity. It is not the device temperature, current
+weather, or a forecast. Garmin's offset-bearing observation timestamp is
+preserved. Weather condition, humidity, wind, and station-presence/timezone
+metadata are compacted; coordinates, station name, and raw nested payloads are
+discarded. Temperature and wind units remain unverified for the unofficial
+endpoint, so those fields intentionally have no unit suffix and
+`units_verified=false`.
 
 `garmin_activity_splits` returns Garmin-recorded laps, preserving each actual
 distance, including a partial final lap. Recorded laps are not guaranteed to be

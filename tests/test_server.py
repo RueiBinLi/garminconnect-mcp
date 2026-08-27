@@ -368,6 +368,30 @@ def test_new_activity_tools_return_compact_provider_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class ReadOnlyActivityProvider:
+        def activity_temperature(self, activity_id: str) -> object:
+            assert activity_id == "987"
+            return {
+                "activity_id": "987",
+                "average_temperature_c": 21.0,
+                "minimum_temperature_c": 19.0,
+                "maximum_temperature_c": 23.0,
+                "sample_count": 3,
+                "source": "garmin_activity_detail_directAirTemperature",
+                "warnings": [],
+            }
+
+        def activity_weather(self, activity_id: str) -> object:
+            assert activity_id == "987"
+            return {
+                "activity_id": "987",
+                "observed_at": "2030-04-12T06:15:00+08:00",
+                "temperature": 24.0,
+                "weather_station_present": True,
+                "weather_station_timezone": "Asia/Example",
+                "source": "garmin_activity_weather_station",
+                "units_verified": False,
+            }
+
         def activity_splits(self, activity_id: str, *, mode: str) -> object:
             assert (activity_id, mode) == ("987", "laps")
             return {
@@ -390,9 +414,15 @@ def test_new_activity_tools_return_compact_provider_results(
     activity_provider = ReadOnlyActivityProvider()
     monkeypatch.setattr(server, "_activity_provider", lambda: activity_provider)
 
+    temperature = server.garmin_activity_temperature("987")
+    weather = server.garmin_activity_weather("987")
     splits = server.garmin_activity_splits("987")
     drift = server.garmin_activity_aerobic_drift("987")
 
+    assert temperature["average_temperature_c"] == 21.0
+    assert temperature["sample_count"] == 3
+    assert weather["temperature"] == 24.0
+    assert weather["units_verified"] is False
     assert splits["split_type"] == "lap"
     assert splits["splits"][0]["distance_m"] == 1000.0
     assert drift["aerobic_decoupling_pct"] == 1.25
@@ -406,6 +436,10 @@ def test_new_activity_tools_return_compact_provider_results(
         ("garmin_activity_splits", {"activity_id": "987", "unknown": True}),
         ("garmin_activity_aerobic_drift", {"activity_id": 987}),
         ("garmin_activity_aerobic_drift", {"activity_id": "987", "unknown": True}),
+        ("garmin_activity_temperature", {"activity_id": 987}),
+        ("garmin_activity_temperature", {"activity_id": "987", "unknown": True}),
+        ("garmin_activity_weather", {"activity_id": 987}),
+        ("garmin_activity_weather", {"activity_id": "987", "unknown": True}),
     ],
 )
 def test_new_activity_tools_reject_invalid_mcp_arguments_before_provider(

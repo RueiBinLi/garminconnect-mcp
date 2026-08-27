@@ -1,3 +1,32 @@
+# Activity Temperature and Weather Observation (Pending Verification)
+
+Use one completed activity with Garmin Connect temperature data and one with a
+weather-station observation. Invoke only the two read-only tools below. Do not
+save exact values, identifiers, coordinates, station names, or raw payloads.
+
+For `garmin_activity_temperature(activity_id)`, verify:
+
+- arithmetic average, minimum, and maximum match Garmin Connect after display
+  rounding;
+- sample count is plausible and no time-series array is returned;
+- source is `garmin_activity_detail_directAirTemperature`;
+- unavailable samples remain excluded and warnings stay factual;
+- device placement, body heat, sunlight, and exposure limitations are clear.
+
+For `garmin_activity_weather(activity_id)`, verify:
+
+- the offset-bearing observation timestamp is preserved;
+- condition and humidity match when Garmin supplies them;
+- wind and temperature values are preserved without unsupported unit labels;
+- `units_verified=false`;
+- coordinates, station name, and raw Garmin objects are absent;
+- source is `garmin_activity_weather_station`.
+
+Confirm neither tool changes Garmin state, no private live values enter tests or
+documentation, and existing aerobic-drift output remains unchanged.
+
+---
+
 # Recorded Laps and Aerobic Drift (Completed)
 
 Manual verification completed on 2026-08-27 using one real running activity.
@@ -52,7 +81,7 @@ scripts/check-private-output.sh
 .venv/bin/python -m compileall -q src
 ```
 
-Also initialize the MCP server over stdio and verify all 34 tools are
+Also initialize the MCP server over stdio and verify all 36 tools are
 discoverable without constructing a Garmin client. With synthetic clients only,
 exercise preview, `confirmed=false`, complete success, first failure, later
 failure, created-but-unscheduled, and uncertain creation/scheduling. Audit the

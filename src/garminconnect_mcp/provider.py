@@ -21,6 +21,12 @@ from .activities import (
     normalize_activity_splits,
     normalized_activity_date,
 )
+from .activity_environment import (
+    ActivityTemperatureSummary,
+    ActivityWeatherObservation,
+    normalize_activity_temperature,
+    normalize_activity_weather,
+)
 from .aerobic_drift import AerobicDriftSummary, analyze_aerobic_drift
 from .heart_rate_zones import (
     MalformedHeartRateZoneResponseError,
@@ -60,6 +66,7 @@ from .workouts import (
 )
 
 MAX_ACTIVITY_PAGE_SIZE = 100
+MAX_TEMPERATURE_CHART_POINTS = 10_000
 MAX_RUNNING_DATE_RANGE_DAYS = 42
 MAX_HRV_RANGE_DAYS = 14
 MAX_WORKOUT_PAGE_SIZE = 100
@@ -74,6 +81,8 @@ class GarminClient(Protocol):
     ) -> Any: ...
 
     def get_activity(self, activity_id: str) -> Any: ...
+
+    def get_activity_weather(self, activity_id: str) -> Any: ...
 
     def get_activity_splits(self, activity_id: str) -> Any: ...
 
@@ -193,6 +202,28 @@ class GarminActivityProvider:
             not_found=True,
         )
         return normalize_activity_splits(raw, activity_id=normalized_id)
+
+    def activity_temperature(self, activity_id: str) -> ActivityTemperatureSummary:
+        normalized_id = self._activity_id(activity_id)
+        raw = self._call(
+            "activity temperature details",
+            lambda client: client.get_activity_details(
+                normalized_id,
+                maxchart=MAX_TEMPERATURE_CHART_POINTS,
+                maxpoly=0,
+            ),
+            not_found=True,
+        )
+        return normalize_activity_temperature(raw, activity_id=normalized_id)
+
+    def activity_weather(self, activity_id: str) -> ActivityWeatherObservation:
+        normalized_id = self._activity_id(activity_id)
+        raw = self._call(
+            "activity weather",
+            lambda client: client.get_activity_weather(normalized_id),
+            not_found=True,
+        )
+        return normalize_activity_weather(raw, activity_id=normalized_id)
 
     def aerobic_drift(self, activity_id: str) -> AerobicDriftSummary:
         normalized_id = self._activity_id(activity_id)

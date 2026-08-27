@@ -169,6 +169,39 @@ seconds per kilometer, bpm, and spm; missing measurements are `null`.
 positions are resolved from `metricDescriptors`; fixed indexes are forbidden.
 Raw samples and polylines remain inside the provider/analysis boundary.
 
+## Activity temperature and weather-station boundary
+
+The two temperature-related sources are intentionally separate:
+
+```text
+get_activity_details()
+  -> descriptor-resolved directAirTemperature samples
+  -> arithmetic Celsius summary
+  -> garmin_activity_temperature
+
+get_activity_weather()
+  -> historical weather-station response
+  -> compact observation with unverified temperature/wind units
+  -> garmin_activity_weather
+```
+
+`garmin_activity_temperature` requests at most 10,000 chart samples with no
+polyline. The installed detail parser resolves `directAirTemperature` through
+`metricDescriptors`; fixed indexes are not used. Missing, non-numeric, Boolean,
+and non-finite samples are discarded. The public result contains only the
+arithmetic mean, minimum, maximum, valid count, source, and warnings. These
+device/activity readings are Celsius but can be affected by device placement,
+body heat, sunlight, and local exposure.
+
+`garmin_activity_weather` uses the unofficial activity-weather method as a
+historical weather-station observation. It preserves a valid ISO 8601
+offset-bearing `issueDate` as `observed_at`, but does not reinterpret the
+timezone. Relative humidity is explicitly percent. Temperature and wind units
+remain unverified, so their names are deliberately unit-neutral and
+`units_verified` is false. Coordinates, station name, raw station/type objects,
+and all other raw fields are discarded; only condition description,
+station-present state, and station timezone survive normalization.
+
 The pure analyzer removes stationary segments from the running halves while
 retaining them as validity evidence, divides accumulated usable distance in
 half, and proportionally splits a segment that crosses the midpoint. Half HR is
@@ -673,7 +706,7 @@ Saved-token Garmin client
 Neither configuration contains Garmin credentials, tokens, MFA values, or a
 repository-local token path. The untracked host configuration stores the
 absolute executable path and `serve` argument; authentication keeps using the
-external default token directory. All 34 tools remain discoverable so future
+external default token directory. All 36 tools remain discoverable so future
 milestones can use the same connection, but the project policy prompts before
 tools by default; only `garmin_connection_status` and `garmin_ping` have
 automatic approval.
@@ -739,7 +772,7 @@ deliberate MCP 2.x migration remains a possible later change.
 
 ## Existing MCP tools
 
-The server exposes 34 tools.
+The server exposes 36 tools.
 
 | Tool | Kind | Current behavior | Specification status |
 | --- | --- | --- | --- |
@@ -755,6 +788,8 @@ The server exposes 34 tools.
 | `garmin_stress` | Read, normalized/private | Returns compact Garmin-native daily summary values | Milestone 4 complete |
 | `garmin_recent_activities` | Read, normalized/private | Returns bounded, optionally running-only activity summaries with explicit units and null unavailable fields | Milestone 3 scope implemented and manually verified |
 | `garmin_activity` | Read, normalized/private | Returns the same stable schema for one numeric activity ID | Milestone 3 scope implemented and manually verified |
+| `garmin_activity_temperature` | Read, normalized/private | Returns arithmetic mean/minimum/maximum Celsius device-recorded temperature without the sample series | Implemented; manual verification pending |
+| `garmin_activity_weather` | Read, normalized/private | Returns a compact historical weather-station observation with unverified temperature/wind units and no coordinates or station name | Implemented; manual verification pending |
 | `garmin_running_activities_by_date` | Read, normalized/private | Returns running activities for an inclusive range of at most 42 days | Milestone 5 complete |
 | `garmin_weekly_running_summary` | Read, aggregate/private | Returns weekly meter/second/count facts, coverage, and longest runs | Milestone 5 complete |
 | `garmin_compare_running_weeks` | Read, aggregate/private | Compares adjacent Monday-Sunday weeks with absolute deltas and coverage | Milestone 5 complete |

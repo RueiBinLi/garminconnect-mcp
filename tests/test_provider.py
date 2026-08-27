@@ -43,6 +43,10 @@ class SyntheticClient:
         self.calls.append(("get_activity", (activity_id,), {}))
         return self._result()
 
+    def get_activity_weather(self, activity_id: str) -> Any:
+        self.calls.append(("get_activity_weather", (activity_id,), {}))
+        return self._result()
+
     def get_activity_splits(self, activity_id: str) -> Any:
         self.calls.append(("get_activity_splits", (activity_id,), {}))
         return self._result()
@@ -162,6 +166,53 @@ def test_activity_splits_returns_only_normalized_recorded_laps() -> None:
     assert client.calls == [("get_activity_splits", ("9000000017",), {})]
 
 
+def test_activity_temperature_uses_bounded_descriptor_resolved_details() -> None:
+    client = SyntheticClient(
+        response={
+            "metricDescriptors": [{"key": "directAirTemperature", "metricsIndex": 1}],
+            "activityDetailMetrics": [
+                {"metrics": ["ignored", 20]},
+                {"metrics": ["ignored", 22]},
+            ],
+        }
+    )
+
+    result = provider(client).activity_temperature(" 9000000019 ")
+
+    assert result["average_temperature_c"] == 21.0
+    assert result["sample_count"] == 2
+    assert client.calls == [
+        (
+            "get_activity_details",
+            ("9000000019",),
+            {"maxchart": 10000, "maxpoly": 0},
+        )
+    ]
+
+
+def test_activity_weather_returns_only_normalized_station_observation() -> None:
+    client = SyntheticClient(
+        response={
+            "issueDate": "2030-04-12T06:15:00+08:00",
+            "temp": 24,
+            "weatherStationDTO": {
+                "name": "Synthetic Hidden Station",
+                "timezone": "Asia/Example",
+            },
+            "latitude": 1.0,
+            "longitude": 2.0,
+        }
+    )
+
+    result = provider(client).activity_weather("9000000020")
+
+    assert result["temperature"] == 24.0
+    assert result["weather_station_present"] is True
+    assert result["weather_station_timezone"] == "Asia/Example"
+    assert "weather_station_name" not in result
+    assert client.calls == [("get_activity_weather", ("9000000020",), {})]
+
+
 @pytest.mark.parametrize("mode", ["kilometers", "mile", "LAPS", ""])
 def test_activity_splits_rejects_unsupported_mode_before_call(mode: str) -> None:
     client = SyntheticClient(response={"lapDTOs": []})
@@ -176,6 +227,50 @@ def test_activity_splits_rejects_unsupported_mode_before_call(mode: str) -> None
 def test_activity_rejects_invalid_identifier(activity_id: str) -> None:
     with pytest.raises(InvalidActivityRequestError, match="positive numeric"):
         provider(SyntheticClient()).activity(activity_id)
+
+
+@pytest.mark.parametrize("method", ["activity_temperature", "activity_weather"])
+@pytest.mark.parametrize("activity_id", ["", "abc", "0", "-1"])
+def test_environment_tools_reject_invalid_identifier_before_call(
+    method: str, activity_id: str
+) -> None:
+    client = SyntheticClient()
+
+    with pytest.raises(InvalidActivityRequestError, match="positive numeric"):
+        getattr(provider(client), method)(activity_id)
+
+    assert client.calls == []
+
+
+@pytest.mark.parametrize(
+    ("upstream_error", "expected_error", "message"),
+    [
+        (
+            GarminConnectAuthenticationError("private upstream text"),
+            ActivityAuthenticationError,
+            "authentication failed",
+        ),
+        (
+            GarminConnectConnectionError("private upstream text"),
+            ActivityEndpointError,
+            "endpoint failed",
+        ),
+        (
+            GarminConnectTooManyRequestsError("private upstream text"),
+            ActivityEndpointError,
+            "rate limit",
+        ),
+    ],
+)
+def test_activity_weather_maps_upstream_failures_safely(
+    upstream_error: Exception,
+    expected_error: type[Exception],
+    message: str,
+) -> None:
+    with pytest.raises(expected_error, match=message) as raised:
+        provider(SyntheticClient(error=upstream_error)).activity_weather("9000000021")
+
+    assert "private upstream text" not in str(raised.value)
 
 
 @pytest.mark.parametrize(

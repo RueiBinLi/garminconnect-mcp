@@ -366,6 +366,38 @@ def garmin_activity(activity_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def garmin_activity_temperature(activity_id: StrictStr) -> dict[str, Any]:
+    """Get compact activity/device-recorded temperature statistics in Celsius.
+
+    Garmin's descriptor-resolved directAirTemperature samples are summarized
+    with an arithmetic mean plus minimum and maximum. Invalid samples are
+    ignored, the full time series is never returned, and unavailable data is
+    represented by null statistics and sample_count=0. Device placement, body
+    heat, sunlight, and local exposure can affect these measurements. Read-only.
+    """
+    return _activity_provider().activity_temperature(activity_id)
+
+
+_forbid_unknown_tool_arguments("garmin_activity_temperature")
+
+
+@mcp.tool()
+def garmin_activity_weather(activity_id: StrictStr) -> dict[str, Any]:
+    """Get historical weather-station data associated with a completed activity.
+
+    This is not device-recorded activity temperature, current weather, or a
+    forecast. The timestamp preserves Garmin's ISO 8601 offset. Temperature and
+    wind fields intentionally have no unit suffix because this unofficial
+    endpoint's units remain unverified; units_verified is false. Coordinates,
+    station name, and raw Garmin payloads are discarded. This tool is read-only.
+    """
+    return _activity_provider().activity_weather(activity_id)
+
+
+_forbid_unknown_tool_arguments("garmin_activity_weather")
+
+
+@mcp.tool()
 def garmin_activity_splits(
     activity_id: StrictStr, mode: StrictStr = "laps"
 ) -> dict[str, Any]:
