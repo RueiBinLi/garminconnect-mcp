@@ -30,6 +30,9 @@ Milestone 11 adds a read-only weekly running-proposal application service,
 strict desired-session constraints, and normalized configured running Zone 2
 reads. Offline verification and one manually accepted live proposal passed on
 2026-08-27 without a Garmin write or retained private value.
+The subsequent naming extension adds strict half-marathon plan identity and a
+Monday plan anchor. The anchor week is `W01`; later proposal weeks derive their
+one-based two-digit week deterministically and cannot precede the anchor.
 
 ## Repository structure
 
@@ -535,6 +538,12 @@ Every numeric intermediate is
 returned under `rule_calculations`; the policy is a product rule, not medical or
 scientific advice.
 
+Workout naming is a pure planning concern. `half_marathon` maps to the fixed
+public code `HM`; arbitrary plan codes are rejected. Names use
+`HM WNN - Purpose Distance`, where distance is the complete workout total in
+kilometers and retains a necessary decimal. This keeps Garmin Connect readable
+without using private identifiers or relying on calendar state.
+
 ## Codex integration
 
 Milestone 2 registers the server in the local Codex host configuration and adds
@@ -768,7 +777,7 @@ identifiers or raw response data.
 | FR-13 Create and schedule | Milestone 10 complete | A strict offline proposal and confirmed provider composition upload once, schedule only the returned ID at most once, and preserve explicit partial state without cleanup. One approved workflow passed manual verification; creation deduplication remains impossible after an uncertain upload. |
 | FR-14 Unschedule workout | Milestone 9 complete | The separate read-preview/confirmation boundary removed the verified assignment once after separate approval; manual verification confirmed the template remained intact. |
 | Training summaries | Milestone 5 complete | Bounded running retrieval, weekly aggregates with coverage, longest-run selection, and week comparisons were manually verified without coaching interpretation. |
-| Weekly planner | Missing | No proposal model or deterministic planning constraints. |
+| Weekly planner | Implemented | Deterministic proposals include strict plan anchoring, desired/maximum sessions, configured Zone 2, and transparent aggregates. |
 | Provider boundary | Partial | Activity, recovery, workout reads, validated creation, and safe existing-workout calendar operations have provider seams; profile and legacy workout writes still directly depend on the Garmin client. |
 | Normalized domain models | Partial | Activities, recovery data, workout reads, and pre-write running definitions use compact schemas; profile, connected writes, and later planning domains do not. |
 | Error handling | Partial | Activity, recovery, workout-read, validated-creation, and Milestone 9 failures use stable secret-safe categories; profile and legacy write families still propagate third-party errors. |

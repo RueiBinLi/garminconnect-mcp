@@ -51,6 +51,12 @@ or raw response is retained in this record.
 All required checks were rerun after acceptance. Milestone 12 was not started,
 and pushing remains subject to separate explicit authorization.
 
+The later naming extension was verified offline: `half_marathon` maps only to
+`HM`, the strict Monday anchor is `W01`, later week numbers are deterministic,
+pre-anchor proposals fail before client construction, and names contain the
+two-digit week, purpose, and complete workout distance. No additional Garmin
+read or write was needed.
+
 ---
 
 # Completed Milestone 10 Safe Create-and-Schedule Verification

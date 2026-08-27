@@ -158,16 +158,27 @@ def test_week_start_is_strict_monday_before_reader_construction(invalid: Any) ->
     [
         [],
         "{}",
-        {"unknown": True},
-        {"maximum_sessions": "3"},
-        {"maximum_sessions": True},
-        {"available_dates": "2030-04-01"},
-        {"available_dates": ["2030-03-31"]},
-        {"available_dates": ["2030-04-01", "2030-04-01"]},
-        {"preferred_long_run_date": "2030-04-08"},
-        {"user_note": " line break\n"},
-        {"account": {"token": "private"}},
-        {"workout_id": "123"},
+        {},
+        {"plan_start_date": "2030-03-04", "unknown": True},
+        {"plan_start_date": "2030-03-04", "maximum_sessions": "3"},
+        {"plan_start_date": "2030-03-04", "maximum_sessions": True},
+        {"plan_start_date": "2030-03-04", "available_dates": "2030-04-01"},
+        {
+            "plan_start_date": "2030-03-04",
+            "available_dates": ["2030-03-31"],
+        },
+        {
+            "plan_start_date": "2030-03-04",
+            "available_dates": ["2030-04-01", "2030-04-01"],
+        },
+        {"plan_start_date": "2030-03-04", "preferred_long_run_date": "2030-04-08"},
+        {"plan_start_date": "2030-03-04", "user_note": " line break\n"},
+        {"plan_start_date": "2030-03-04", "account": {"token": "private"}},
+        {"plan_start_date": "2030-03-04", "workout_id": "123"},
+        {"plan_start_date": "2030-03-05"},
+        {"plan_start_date": "2030-04-08"},
+        {"plan_start_date": "2030-3-04"},
+        {"plan_start_date": "2030-03-04", "plan_type": "marathon"},
     ],
 )
 def test_constraints_reject_bulk_coercion_unknown_and_out_of_week(
@@ -179,13 +190,16 @@ def test_constraints_reject_bulk_coercion_unknown_and_out_of_week(
 
 def test_constraints_model_rejects_unknown_fields_at_schema_boundary() -> None:
     with pytest.raises(ValidationError):
-        ProposalConstraints.model_validate({"url": "https://private.invalid"})
+        ProposalConstraints.model_validate(
+            {"plan_start_date": "2030-03-04", "url": "https://private.invalid"}
+        )
 
 
 def test_bounded_normalized_reads_and_deterministic_valid_output() -> None:
     recovery = [hrv(f"2030-03-{day:02}") for day in range(25, 32)]
     planner, calls = service(sufficient_history(), recovery)
     constraints = ProposalConstraints(
+        plan_start_date="2030-03-04",
         available_dates=["2030-04-02", "2030-04-04", "2030-04-07"],
         maximum_sessions=3,
         preferred_long_run_date="2030-04-07",
@@ -213,6 +227,11 @@ def test_bounded_normalized_reads_and_deterministic_valid_output() -> None:
     assert [item["date"] for item in first["proposed_sessions"]] == [
         "2030-04-02",
         "2030-04-07",
+    ]
+    assert first["constraints"]["plan_week_number"] == 5
+    assert [item["definition"]["name"] for item in first["proposed_sessions"]] == [
+        "HM W05 - Easy 4.8K",
+        "HM W05 - Long 7.2K",
     ]
     assert [
         item["aggregates"]["total_distance_m"] for item in first["proposed_sessions"]
@@ -251,7 +270,11 @@ def test_existing_running_commitment_is_compact_preserved_and_not_duplicated() -
     planner, _ = service(sufficient_history(), scheduled=[commitment])
     result = planner.propose(
         "2030-04-01",
-        {"available_dates": ["2030-04-02", "2030-04-04"], "maximum_sessions": 2},
+        {
+            "plan_start_date": "2030-03-04",
+            "available_dates": ["2030-04-02", "2030-04-04"],
+            "maximum_sessions": 2,
+        },
     )
 
     assert result["existing_scheduled_commitments"] == [
@@ -273,7 +296,7 @@ def test_existing_running_commitment_is_compact_preserved_and_not_duplicated() -
 
 def test_missing_and_insufficient_history_returns_normalized_state() -> None:
     planner, _ = service([activity("2030-03-25", None, 1200)])
-    result = planner.propose("2030-04-01", {})
+    result = planner.propose("2030-04-01", {"plan_start_date": "2030-03-04"})
 
     assert result["factual_training_summary"]["history_sufficient"] is False
     assert result["factual_training_summary"]["baseline_weekly_distance_m"] is None
@@ -289,7 +312,7 @@ def test_missing_and_insufficient_history_returns_normalized_state() -> None:
 def test_recovery_rule_is_factual_conservative_and_non_medical() -> None:
     recovery = [hrv("2030-03-30", "LOW"), hrv("2030-03-31", "unbalanced")]
     planner, _ = service(sufficient_history(), recovery)
-    result = planner.propose("2030-04-01", {})
+    result = planner.propose("2030-04-01", {"plan_start_date": "2030-03-04"})
 
     assert result["rule_calculations"]["recovery_multiplier"] == 0.9
     assert result["rule_calculations"]["new_distance_target_m"] == 11700
@@ -305,6 +328,7 @@ def test_desired_sessions_overrides_baseline_but_not_maximum() -> None:
     result = planner.propose(
         "2030-04-01",
         {
+            "plan_start_date": "2030-03-04",
             "available_dates": [
                 "2030-04-01",
                 "2030-04-02",
@@ -333,14 +357,35 @@ def test_desired_sessions_must_not_exceed_maximum_before_readers() -> None:
 
     planner = WeeklyProposalService(reader, reader, reader, reader)
     with pytest.raises(InvalidProposalRequestError):
-        planner.propose("2030-04-01", {"desired_sessions": 4, "maximum_sessions": 3})
+        planner.propose(
+            "2030-04-01",
+            {
+                "plan_start_date": "2030-03-04",
+                "desired_sessions": 4,
+                "maximum_sessions": 3,
+            },
+        )
+    assert constructed is False
+
+
+def test_plan_week_must_not_precede_anchor_before_readers() -> None:
+    constructed = False
+
+    def reader() -> Reader:
+        nonlocal constructed
+        constructed = True
+        return Reader([], [], "unexpected")
+
+    planner = WeeklyProposalService(reader, reader, reader, reader)
+    with pytest.raises(InvalidProposalRequestError, match="earlier"):
+        planner.propose("2030-04-01", {"plan_start_date": "2030-04-08"})
     assert constructed is False
 
 
 def test_malformed_normalized_data_maps_to_safe_error() -> None:
     planner, _ = service([{"raw": "secret upstream payload"}])
     with pytest.raises(MalformedProposalDataError) as raised:
-        planner.propose("2030-04-01", {})
+        planner.propose("2030-04-01", {"plan_start_date": "2030-03-04"})
     assert str(raised.value) == "Normalized proposal input was malformed"
     assert "secret" not in str(raised.value)
 

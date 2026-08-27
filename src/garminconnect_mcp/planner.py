@@ -6,7 +6,7 @@ import unicodedata
 from collections.abc import Callable
 from datetime import date, timedelta
 from statistics import median
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -41,6 +41,8 @@ class ProposalConstraints(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    plan_type: Literal["half_marathon"] = "half_marathon"
+    plan_start_date: str
     available_dates: list[str] | None = Field(default=None, min_length=1, max_length=7)
     maximum_sessions: int = Field(default=3, strict=True, ge=1, le=7)
     desired_sessions: int | None = Field(default=None, strict=True, ge=1, le=7)
@@ -54,6 +56,9 @@ class ProposalConstraints(BaseModel):
 
     @model_validator(mode="after")
     def validate_values(self) -> ProposalConstraints:
+        plan_start = _strict_date(self.plan_start_date, name="plan_start_date")
+        if plan_start.weekday() != 0:
+            raise ValueError("plan_start_date must be a Monday")
         dates = self.available_dates or []
         if len(set(dates)) != len(dates):
             raise ValueError("available_dates must not contain duplicates")
@@ -154,7 +159,35 @@ def validate_proposal_request(
         raise InvalidProposalRequestError(
             "preferred_long_run_date must fall within the requested week"
         )
+    plan_start = date.fromisoformat(normalized.plan_start_date)
+    if monday < plan_start:
+        raise InvalidProposalRequestError(
+            "week_start must not be earlier than plan_start_date"
+        )
     return monday, normalized
+
+
+def _plan_week_number(week_start: date, plan_start_date: str) -> int:
+    return ((week_start - date.fromisoformat(plan_start_date)).days // 7) + 1
+
+
+def _distance_label(distance_m: float) -> str:
+    distance_km = distance_m / 1000
+    return f"{distance_km:g}K"
+
+
+def _workout_name(
+    plan_type: Literal["half_marathon"],
+    week_number: int,
+    purpose: Literal["easy_run", "long_run"],
+    distance_m: float,
+) -> str:
+    plan_code = {"half_marathon": "HM"}[plan_type]
+    purpose_label = {"easy_run": "Easy", "long_run": "Long"}[purpose]
+    return (
+        f"{plan_code} W{week_number:02d} - {purpose_label} "
+        f"{_distance_label(distance_m)}"
+    )
 
 
 def _distance_workout(
@@ -274,6 +307,7 @@ class WeeklyProposalService:
             activities, lookback_start.isoformat(), lookback_end.isoformat()
         )
         weeks = weekly["weeks"]
+        plan_week_number = _plan_week_number(monday, constraints.plan_start_date)
         qualifying = [
             week
             for week in weeks
@@ -404,9 +438,12 @@ class WeeklyProposalService:
             for execution_order, proposed_date in enumerate(selected_dates, start=1):
                 purpose = "long_run" if proposed_date == long_date else "easy_run"
                 definition = _distance_workout(
-                    "Proposed Long Run"
-                    if purpose == "long_run"
-                    else "Proposed Easy Run",
+                    _workout_name(
+                        constraints.plan_type,
+                        plan_week_number,
+                        purpose,
+                        distances[proposed_date],
+                    ),
                     distances[proposed_date],
                     zone2_target,
                 )
@@ -498,6 +535,9 @@ class WeeklyProposalService:
                 "zone2_complete": True,
             },
             "constraints": {
+                "plan_type": constraints.plan_type,
+                "plan_start_date": constraints.plan_start_date,
+                "plan_week_number": plan_week_number,
                 "available_dates": available_dates,
                 "maximum_sessions": constraints.maximum_sessions,
                 "desired_sessions": constraints.desired_sessions,
@@ -520,6 +560,8 @@ class WeeklyProposalService:
                 "occupied dates.",
                 "desired_sessions sets the requested count; maximum_sessions "
                 "remains a hard safety cap.",
+                "Workout names use the plan code, two-digit plan week, purpose, "
+                "and total distance in kilometers.",
                 "The long run receives 100% with one new session, 60% with two, "
                 "or 40% with three or more; remaining distance is divided equally.",
                 "Every session uses 10% warmup, 80% configured Zone 2 run, and "

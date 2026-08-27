@@ -537,6 +537,7 @@ Use available information such as:
 * [x] already scheduled running workouts, compacted and preserved
 * [x] strict explicit user constraints
 * [x] desired session count with maximum sessions retained as a hard cap
+* [x] strict half-marathon plan start and deterministic `HM WNN` workout names
 
 ## Output
 

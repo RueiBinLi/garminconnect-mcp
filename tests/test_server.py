@@ -490,7 +490,11 @@ def test_weekly_proposal_uses_only_four_normalized_read_operations(
 ) -> None:
     result = server.garmin_weekly_running_proposal(
         "2030-04-01",
-        server.ProposalConstraints(available_dates=["2030-04-02"], maximum_sessions=1),
+        server.ProposalConstraints(
+            plan_start_date="2030-03-04",
+            available_dates=["2030-04-02"],
+            maximum_sessions=1,
+        ),
     )
 
     assert result["proposal_only"] is True
@@ -525,20 +529,52 @@ def test_running_heart_rate_zones_returns_compact_normalized_ranges(
 @pytest.mark.parametrize(
     "arguments",
     [
-        {"week_start": "2030-04-02", "constraints": {}},
-        {"week_start": "2030-04-01T00:00:00", "constraints": {}},
-        {"week_start": "2030-04-01", "constraints": {"maximum_sessions": "3"}},
-        {"week_start": "2030-04-01", "constraints": {"desired_sessions": "4"}},
+        {
+            "week_start": "2030-04-02",
+            "constraints": {"plan_start_date": "2030-03-04"},
+        },
+        {
+            "week_start": "2030-04-01T00:00:00",
+            "constraints": {"plan_start_date": "2030-03-04"},
+        },
         {
             "week_start": "2030-04-01",
-            "constraints": {"desired_sessions": 4, "maximum_sessions": 3},
+            "constraints": {
+                "plan_start_date": "2030-03-04",
+                "maximum_sessions": "3",
+            },
         },
-        {"week_start": "2030-04-01", "constraints": {"unknown": True}},
         {
             "week_start": "2030-04-01",
-            "constraints": {"available_dates": ["2030-04-08"]},
+            "constraints": {
+                "plan_start_date": "2030-03-04",
+                "desired_sessions": "4",
+            },
         },
-        {"week_start": "2030-04-01", "constraints": {}, "raw": {}},
+        {
+            "week_start": "2030-04-01",
+            "constraints": {
+                "plan_start_date": "2030-03-04",
+                "desired_sessions": 4,
+                "maximum_sessions": 3,
+            },
+        },
+        {
+            "week_start": "2030-04-01",
+            "constraints": {"plan_start_date": "2030-03-04", "unknown": True},
+        },
+        {
+            "week_start": "2030-04-01",
+            "constraints": {
+                "plan_start_date": "2030-03-04",
+                "available_dates": ["2030-04-08"],
+            },
+        },
+        {
+            "week_start": "2030-04-01",
+            "constraints": {"plan_start_date": "2030-03-04"},
+            "raw": {},
+        },
     ],
 )
 def test_weekly_proposal_rejects_invalid_mcp_requests_before_garmin(

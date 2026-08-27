@@ -464,9 +464,10 @@ def garmin_weekly_running_proposal(
 ) -> dict[str, Any]:
     """Propose running sessions for exactly one Monday-Sunday week, read-only.
 
-    The strict constraints accept only available_dates, desired_sessions,
-    maximum_sessions, preferred_long_run_date, maximum_weekly_distance_m, and
-    user_note. The tool reads 28 preceding activity days, 7 preceding HRV days,
+    The strict constraints accept only plan_type, plan_start_date,
+    available_dates, desired_sessions, maximum_sessions,
+    preferred_long_run_date, maximum_weekly_distance_m, and user_note. The tool
+    reads 28 preceding activity days, 7 preceding HRV days,
     configured running heart-rate zones, and scheduled workouts in the requested
     week through normalized providers. It preserves
     existing commitments and returns validated WorkoutDefinitions as proposals.

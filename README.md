@@ -382,12 +382,20 @@ Garmin workout or calendar change was made and no private value was retained.
 read-only Monday-Sunday proposal. `week_start` must be a strict `YYYY-MM-DD`
 Monday. The strict constraints object accepts only:
 
+- `plan_type`: currently exactly `half_marathon`, rendered as `HM`;
+- `plan_start_date`: a strict Monday; its week is `W01`;
 - `available_dates`: one to seven unique dates inside the proposal week;
 - `desired_sessions`: requested session count from 1 through 7;
 - `maximum_sessions`: integer from 1 through 7 (default 3);
 - `preferred_long_run_date`: an available date inside the week;
 - `maximum_weekly_distance_m`: 1,000 through 300,000 meters;
 - `user_note`: 1 through 200 printable ASCII characters.
+
+The proposal week must not precede `plan_start_date`. Workout names use the
+deterministic format `{code} W{week} - {purpose} {distance}`, with a two-digit
+week and total workout distance in kilometers. Examples include
+`HM W05 - Easy 8K` and `HM W05 - Long 16K`; fractional totals remain explicit,
+such as `HM W05 - Easy 7.5K`.
 
 The bounded reads are the 28 days immediately before the proposal week for
 normalized running activities, the final 7 of those days for normalized HRV,
