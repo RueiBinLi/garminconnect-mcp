@@ -713,6 +713,28 @@ data, or raw payloads into documentation, commits, tests, fixtures, issues,
 logs, or summaries. Never inspect or display credentials, MFA codes, saved
 tokens, or session files.
 
+## Future-calendar parsing regression verification
+
+The calendar parser now accepts flat `itemType: "workout"` entries as well as
+the older embedded-workout shape. Its previous embedded-only filter could
+return an empty schedule despite planned workouts being present. Read-only
+diagnostics confirmed the flat shape and verified its assignment ID against the
+scheduled-workout lookup. No Garmin write or private payload capture is needed.
+
+After reconnecting the updated MCP server:
+
+1. Call `garmin_scheduled_workouts` for a known planned workout date. Compare its
+   date, name, and sport with Garmin Connect.
+2. Check a future range spanning a month boundary (at most 31 inclusive days).
+   Confirm planned workouts on both sides appear, while completed activities,
+   weight entries, naps, and other non-workout items do not.
+3. Confirm missing estimates remain null and no raw payload is returned.
+4. Confirm no workout or calendar state changed. No watch/device writes are
+   needed. User comparison after reconnect remains pending until confirmed.
+
+Do not record personal dates, names, identifiers, counts, or raw payloads here.
+The automated regression fixtures are synthetic.
+
 ## Semantics to verify
 
 - Saved pagination uses strict JSON integers: `start >= 0` and `limit` from 1

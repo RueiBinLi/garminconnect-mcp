@@ -631,13 +631,17 @@ def garmin_workouts(
 
 @mcp.tool()
 def garmin_scheduled_workouts(start_date: str, end_date: str) -> dict[str, Any]:
-    """List read-only scheduled workouts in an inclusive range up to 31 days.
+    """List past or future scheduled workouts in an inclusive range up to 31 days.
 
     Dates must be strict YYYY-MM-DD Garmin calendar dates. The provider fetches
-    the intersecting Garmin calendar month(s), discards non-workout items, and
-    orders results by scheduled date and IDs. Dates are date-only: no timezone
-    or instant is inferred. Duration uses seconds, distance uses meters,
+    the intersecting Garmin calendar month(s), reads flat and embedded workout
+    entries, discards non-workout items, and orders results by scheduled date
+    and IDs. Dates are date-only: no timezone or instant is inferred.
+    Duration uses seconds, distance uses meters,
     unavailable fields are null, and raw calendar/step payloads are discarded.
+    This tool is read-only. Generic calendar duration/distance fields are not
+    used because their units are unverified. Only workouts returned by Garmin's
+    calendar endpoint are visible; saved templates alone are not a schedule.
     """
     items = _workout_provider().scheduled_workouts(start_date, end_date)
     return {

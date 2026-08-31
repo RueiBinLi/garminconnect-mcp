@@ -658,6 +658,57 @@ def test_scheduled_range_fetches_intersecting_months_and_filters_dates() -> None
     ]
 
 
+def test_scheduled_range_includes_flat_future_calendar_workouts() -> None:
+    def entry(schedule_id: int, day: str) -> dict[str, object]:
+        return {
+            "itemType": "workout",
+            "id": schedule_id,
+            "workoutId": 8100000021,
+            "date": day,
+            "title": "Synthetic planned run",
+            "sportTypeKey": "running",
+            "duration": 30,
+            "distance": 5,
+            "url": "https://private.invalid/ignored",
+        }
+
+    client = SyntheticClient(
+        monthly_responses={
+            (2030, 12): {"calendarItems": [entry(8300000011, "2030-12-31")]},
+            (2031, 1): {
+                "calendarItems": [
+                    entry(8300000013, "2031-01-02"),
+                    entry(8300000012, "2031-01-01"),
+                    {**entry(8300000014, "2031-01-01"), "itemType": "activity"},
+                ]
+            },
+        }
+    )
+
+    items = provider(client).scheduled_workouts("2030-12-31", "2031-01-01")
+
+    assert items == [
+        {
+            "scheduled_workout_id": str(schedule_id),
+            "scheduled_date": day,
+            "workout_id": "8100000021",
+            "name": "Synthetic planned run",
+            "sport_type": "running",
+            "description": None,
+            "estimated_duration_s": None,
+            "estimated_distance_m": None,
+        }
+        for schedule_id, day in (
+            (8300000011, "2030-12-31"),
+            (8300000012, "2031-01-01"),
+        )
+    ]
+    assert client.calls == [
+        ("get_scheduled_workouts", (2030, 12)),
+        ("get_scheduled_workouts", (2031, 1)),
+    ]
+
+
 @pytest.mark.parametrize(
     ("start_date", "end_date"),
     [
@@ -787,14 +838,23 @@ def test_schedule_checks_duplicate_then_writes_exactly_once() -> None:
     assert "private" not in rendered
 
 
-def test_exact_duplicate_is_idempotent_and_makes_no_schedule_call() -> None:
-    client = SyntheticClient(
-        monthly_responses={
-            (2030, 6): {
-                "scheduledWorkouts": [scheduled(8300000099, 8100000099, "2030-06-15")]
-            }
+@pytest.mark.parametrize("flat_calendar", [False, True])
+def test_exact_duplicate_is_idempotent_and_makes_no_schedule_call(
+    flat_calendar: bool,
+) -> None:
+    response = {"scheduledWorkouts": [scheduled(8300000099, 8100000099, "2030-06-15")]}
+    if flat_calendar:
+        response = {
+            "calendarItems": [
+                {
+                    "itemType": "workout",
+                    "id": 8300000099,
+                    "workoutId": 8100000099,
+                    "date": "2030-06-15",
+                }
+            ]
         }
-    )
+    client = SyntheticClient(monthly_responses={(2030, 6): response})
 
     result = provider(client).schedule_existing_workout("8100000099", "2030-06-15")
 

@@ -134,8 +134,22 @@ def normalize_scheduled_workout(raw: Any) -> NormalizedScheduledWorkout:
 
     template = raw.get("workout")
     if not isinstance(template, dict):
-        template = raw
+        if raw.get("itemType") == "workout":
+            # Monthly calendar entries are flat. Their `id` identifies the
+            # assignment, never the template. Generic duration/distance fields
+            # have no verified units here and must not become estimates.
+            template = {
+                "workoutId": raw.get("workoutId"),
+                "workoutName": raw.get("title"),
+                "sportType": raw.get("sportTypeKey"),
+            }
+        else:
+            template = raw
     workout = normalize_workout(template)
+
+    schedule_id = _first_present(raw, _SCHEDULE_ID_KEYS)
+    if schedule_id is None and raw.get("itemType") == "workout":
+        schedule_id = raw.get("id")
 
     scheduled_date = _text(_first_present(raw, _SCHEDULE_DATE_KEYS))
     if scheduled_date is not None:
@@ -148,7 +162,7 @@ def normalize_scheduled_workout(raw: Any) -> NormalizedScheduledWorkout:
             ) from exc
 
     return {
-        "scheduled_workout_id": _identifier(_first_present(raw, _SCHEDULE_ID_KEYS)),
+        "scheduled_workout_id": _identifier(schedule_id),
         "scheduled_date": scheduled_date,
         **workout,
     }
@@ -191,8 +205,12 @@ def scheduled_workout_items(raw: Any) -> list[dict[str, Any]]:
     return [
         item
         for item in items
-        if isinstance(item.get("workout"), dict)
-        and _first_present(item, _SCHEDULE_ID_KEYS) is not None
+        if item.get("itemType") == "workout"
+        or (
+            item.get("itemType") is None
+            and isinstance(item.get("workout"), dict)
+            and _first_present(item, _SCHEDULE_ID_KEYS) is not None
+        )
     ]
 
 

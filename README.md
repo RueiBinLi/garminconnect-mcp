@@ -175,6 +175,15 @@ clearly whether the task must remain read-only.
 > List my running workout templates and the workouts scheduled for the next two
 > weeks. This is read-only; do not change Garmin Connect.
 
+`garmin_scheduled_workouts(start_date, end_date)` reads past or future scheduled
+workouts for an inclusive range of up to 31 days, including across month/year
+boundaries. It supports both flat Garmin calendar workout entries and embedded
+workout records. Saved templates without a calendar assignment are not included.
+Only workouts exposed by Garmin's calendar endpoint are visible. Missing
+estimates remain `null`; generic calendar duration/distance units are not assumed.
+After updating the server, reconnect the Garmin MCP or restart its client to load
+the calendar parsing fix. No configuration or dependency changes are required.
+
 ### Build a workout safely
 
 > Preview—but do not create—a running workout named “Easy 45” with a 10-minute

@@ -771,6 +771,47 @@ def test_garmin_scheduled_workouts_returns_normalized_range(
     assert fake_client.calls == [("get_scheduled_workouts", (2026, 5), {})]
 
 
+def test_mcp_scheduled_workouts_includes_flat_calendar_entries(
+    fake_client: FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def calendar(year: int, month: int) -> dict[str, object]:
+        fake_client.calls.append(("get_scheduled_workouts", (year, month), {}))
+        return {
+            "calendarItems": [
+                {
+                    "itemType": "workout",
+                    "id": 8300000001,
+                    "workoutId": 8100000001,
+                    "title": "Synthetic future run",
+                    "sportTypeKey": "running",
+                    "date": "2030-04-12",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(fake_client, "get_scheduled_workouts", calendar)
+
+    async def call_tool() -> object:
+        return await server.mcp.call_tool(
+            "garmin_scheduled_workouts",
+            {"start_date": "2030-04-12", "end_date": "2030-04-12"},
+        )
+
+    _, result = anyio.run(call_tool)
+    assert result["count"] == 1
+    assert result["items"][0] == {
+        "scheduled_workout_id": "8300000001",
+        "scheduled_date": "2030-04-12",
+        "workout_id": "8100000001",
+        "name": "Synthetic future run",
+        "sport_type": "running",
+        "description": None,
+        "estimated_duration_s": None,
+        "estimated_distance_m": None,
+    }
+    assert fake_client.calls == [("get_scheduled_workouts", (2030, 4), {})]
+
+
 def synthetic_creation_definition() -> dict[str, object]:
     return {
         "name": "Synthetic Creation Fixture",

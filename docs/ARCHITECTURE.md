@@ -342,10 +342,16 @@ adapters so coercible lookalikes are rejected before a provider call.
 
 `garmin_scheduled_workouts` accepts strict inclusive dates spanning at most 31
 days. The provider fetches one or, for a cross-month range, two intersecting
-calendar months, retains only entries with a schedule identifier and embedded
-workout, then filters to the requested dates. Results sort by scheduled date,
-scheduled-workout ID, and workout ID. The endpoint supplies a Garmin
-`calendarDate` in `YYYY-MM-DD`; this is a calendar label, not an instant. No UTC
+calendar months, retains flat entries marked `itemType: "workout"` as well as
+legacy untyped entries with a schedule identifier and embedded workout, then
+filters to the requested dates. Explicit non-workout types are discarded even
+if they contain workout references. Flat entries map `id` to the schedule ID,
+`workoutId` to the template ID, `title` to the name, and `sportTypeKey` to the
+sport. The assignment ID is never used as a missing template ID. Entries with
+missing IDs remain visible with null IDs; existing write validation still applies.
+Results sort by scheduled date, scheduled-workout ID, and workout ID. The
+endpoint supplies `date` or `calendarDate` in `YYYY-MM-DD`; this is a calendar
+label, not an instant. No UTC
 offset, local zone, or time-of-day is inferred. A scheduled entry without a
 usable date cannot be placed in a bounded range and is omitted; malformed
 non-date values are rejected.
@@ -357,6 +363,15 @@ The normalizers discard owner/account metadata, internal URLs, unrelated IDs,
 timestamps of uncertain semantics, arbitrary calendar entries, and nested step
 payloads. No step count is exposed because the list/calendar endpoints have not
 yet been verified to supply a stable summary count.
+Flat calendar `duration` and `distance` fields have unverified units and are not
+converted to estimates. The flat-entry adapter does not fetch template details.
+
+The future-calendar regression was caused by requiring embedded workout data
+for every calendar item, silently dropping valid flat entries. Synthetic tests
+now cover both shapes, a year boundary, MCP dispatch, non-workout filtering,
+missing identifiers, and duplicate scheduling prevention. Read-only live lookup
+verified that a flat assignment ID resolves to the same workout and date; no
+private payload is retained in the repository.
 
 Only known direct-list, `workouts`, `scheduledWorkouts`, and `calendarItems`
 envelopes are accepted. Empty known lists return empty results. Wrong container

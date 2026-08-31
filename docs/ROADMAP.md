@@ -294,6 +294,14 @@ strict MCP validation, date-only calendar semantics, and current Garmin “My
 Workouts” pagination and ordering all passed private comparison. No Garmin
 write or delete operation was used, and no private values were recorded.
 
+Follow-up calendar fix: support flat `itemType: "workout"` entries in addition
+to embedded records. The prior parser silently dropped flat planned workouts.
+Synthetic coverage includes future dates across a year boundary, MCP dispatch,
+privacy filtering, null identifiers, and duplicate scheduling prevention. The
+public tool schema and 31-day limit are unchanged; no new dependencies or Garmin
+writes are required. Reconnect the MCP server after updating. Private read-only
+verification and the user comparison checklist are tracked in `MANUAL_TESTING.md`.
+
 ## Manual Tests
 
 Ask:

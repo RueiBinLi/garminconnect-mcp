@@ -125,6 +125,43 @@ def test_scheduled_items_discard_non_workout_calendar_items() -> None:
     ) == [scheduled]
 
 
+def test_flat_calendar_workout_does_not_use_assignment_id_as_template_id() -> None:
+    result = normalize_scheduled_workout(
+        {"itemType": "workout", "id": 8300000004, "date": "2030-04-14"}
+    )
+
+    assert result["scheduled_workout_id"] == "8300000004"
+    assert result["workout_id"] is None
+    assert result["name"] is None
+    assert result["sport_type"] is None
+
+
+def test_calendar_workout_without_assignment_id_is_still_visible() -> None:
+    item = {"itemType": "workout", "workoutId": 8100000005, "date": "2030-04-14"}
+
+    assert scheduled_workout_items({"calendarItems": [item]}) == [item]
+    result = normalize_scheduled_workout(item)
+    assert result["scheduled_workout_id"] is None
+    assert result["workout_id"] == "8100000005"
+
+
+@pytest.mark.parametrize("item_type", ["activity", "weight", "nap", "event"])
+def test_calendar_explicit_non_workout_type_is_excluded(item_type: str) -> None:
+    item = {
+        "itemType": item_type,
+        "workoutId": 8100000006,
+        "workout": synthetic_workout(),
+        "workoutScheduleId": 8300000006,
+    }
+
+    assert scheduled_workout_items({"calendarItems": [item]}) == []
+
+
+def test_flat_calendar_workout_rejects_invalid_date() -> None:
+    with pytest.raises(MalformedWorkoutResponseError, match="date"):
+        normalize_scheduled_workout({"itemType": "workout", "date": "2030-02-30"})
+
+
 @pytest.mark.parametrize(
     "raw",
     [None, {}, {"workouts": {}}, {"calendarItems": ["bad item"]}],
